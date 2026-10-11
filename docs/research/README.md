@@ -27,6 +27,7 @@ Charging evidence:
 - [PMU Wake/Sleep/Quiesce](p105-pmu-lifecycle.md)
 - [Source-event notifications](p105-source-events.md)
 - [Input-current backoff, stored cap and deadline](p105-source-backoff.md)
+- [Actual zero-input apply and communication-failure boundaries](p105-zero-input.md)
 - [Charging status and blocked recovery paths](p105-charge-status.md)
 - [Concrete charger guard-field owners](p105-charge-guard-ownership.md)
 - [System watchdog and charger protection distinction](p105-pmu-watchdog.md)
