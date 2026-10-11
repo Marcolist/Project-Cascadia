@@ -22,10 +22,12 @@ test. The normal boot procedure remains [QUICKSTART](../QUICKSTART.md).
 
 Charging evidence:
 
+- [Battery percentage validation](p105-battery-validation.md)
 - [D1946 current and battery policy](p105-charging.md)
 - [PMU Wake/Sleep/Quiesce](p105-pmu-lifecycle.md)
 - [Source-event notifications](p105-source-events.md)
 - [Input-current backoff, stored cap and deadline](p105-source-backoff.md)
+- [Charging status and blocked recovery paths](p105-charge-status.md)
 - [USB gadget budget integration gap](p105-usb-charge-budget.md)
 - [Host current-offset request receiver](p105-usb-current-request.md)
 
@@ -38,6 +40,7 @@ Storage and USB evidence:
 - [EHCI/OHCI controller and port power](p105-usb-ehci.md)
 - [THS7383 accessory routing and orientation](p105-tristar-routing.md)
 - [Accessory rail callbacks and ID-derived voltage](p105-accessory-power.md)
+- [Accessory switch GPIO descriptor and simulated provider](p105-accessory-gpio.md)
 
 Run `python3 scripts/test-offline.py` from the repository root. It runs all
 `tests/test*.py` entry points, including names with hyphens. C fixtures use a

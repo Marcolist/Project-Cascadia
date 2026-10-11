@@ -388,7 +388,12 @@ status function `0x80ed0c24` maps:
 | r3 boolean pointer | Register 0x0b bit 5. |
 | Fourth pointer on stack | `HighOrLowTemperature` if register 0x0b bit 4; otherwise null. |
 
-The first three boolean names are deliberately left unresolved. Generic
+The first boolean contributes to aggregate `IsCharging` through the generic
+source iterator; additional policy can also set that report. The generic
+consumer associates the second and third with software log labels `END`
+and `TO`, respectively; this does not prove hardware timer thresholds. See
+[the status/recovery consumer experiments](p105-charge-status.md) for the
+actual branches, boundary tests and explicit blocked backend calls. Generic
 helper `0x804c5690` aggregates them, records a non-null reason at charger
 offset 0x1c4 when empty, and conditionally invokes backend slots +0x74 or
 +0x78. Those paths perform register writes; they were **not** emulated or
