@@ -18,7 +18,7 @@ test. The normal boot procedure remains [QUICKSTART](../QUICKSTART.md).
 | --- | --- | --- |
 | Battery/PMU | Atomic HDQ cache, valid percentage range, break failure handling, discharge status, GPIO errors, removal of event-consuming probe dump | Complete charger initialization, battery/fault protection, voltage/termination policy and hardware verification |
 | NAND | Read progress/ECC errors, explicit read-only MEMREAD backend with exact sysfs/device identity, strict metadata/cache checks, reduced mapper memory, NBD bounds/setup/worker cleanup, pidfd control and generation-bound System readiness | Actual process/sysfs hardware integration, target capacity/performance, writable PPN/FTL and Linux-owned storage |
-| USB | Host-only build/link, bounded ADT parser, PHY power-error handling, two-bit GPIO selector masks, isolated HID/storage profile | Complete connector routing, external 5 V VBUS/protection, role transitions and real peripherals |
+| USB | Host-only build/link, bounded ADT parser, PHY power-error handling, two-bit GPIO selector masks, isolated HID/storage profile | Partial-power-off/core-count resume recovery, complete connector routing, external 5 V VBUS/protection, role transitions and real peripherals |
 
 Charging evidence:
 
@@ -46,6 +46,7 @@ Storage and USB evidence:
 - [DWC2 versus Apple EHCI/OHCI controller boundaries](p105-usb-controller-boundaries.md)
 - [Lightning accessory-side voltage conversion and missing wiring](lightning-accessory-conversion.md)
 - [PHY error-path assumptions](p105-usb-phy-errors.md)
+- [Reproduced partial-off/Core-count gap and shared lifecycle](p105-usb-shared-lifecycle.md)
 - [EHCI/OHCI controller and port power](p105-usb-ehci.md)
 - [THS7383 accessory routing and orientation](p105-tristar-routing.md)
 - [Accessory rail callbacks and ID-derived voltage](p105-accessory-power.md)

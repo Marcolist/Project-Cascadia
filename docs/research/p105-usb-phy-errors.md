@@ -45,7 +45,7 @@ The Linux PHY core retains `power_count` after a failed power-off callback;
 an explicit subsequent power-off can therefore retry cleanup. This does not
 establish that a new power-on after partial cleanup restores both supplies:
 the core skips the power-on callback while its count is nonzero. That shared
-consumer lifecycle needs a separate review. The test models early provider
+consumer lifecycle is reproduced in the separate [core-count and shared-lifecycle tests](p105-usb-shared-lifecycle.md); it remains an unresolved consequence of the error-return change. The test models early provider
 failures only, not the regulator core's complete dependency graph.
 
 ## OTG initialization and optional resource mapping
