@@ -20,7 +20,10 @@
  *                              SIGTERM; read-only, writes are refused
  *
  * The cache is /var/lib/iosnand/pages.v1 (IOSNAND_CACHE overrides).  Both NAND
- * buses stay locked while iosnand runs.  Build:
+ * buses stay locked while iosnand runs.  IOSNAND_BACKEND=mtd explicitly opts
+ * into the read-only kernel driver instead of /dev/mem; the default is pio.
+ * MTD failures never fall back to PIO.  MTD mode scans every page each time,
+ * because the MTD API does not expose the physical PPN erased status. Build:
  *   arm-linux-gnueabihf-gcc -static -O2 -D_FILE_OFFSET_BITS=64 -o iosnand \
  *       tools/nand/iosnand.c tools/nand/ppn.c
  */
@@ -43,6 +46,8 @@
 #include <unistd.h>
 
 #include "ppn.h"
+#include "iosnand-mtd.h"
+static int use_mtd;
 
 #define NLBA            (16000000000ull / 4096)         /* disk0, in 4 KB */
 #define NONE            0xffffffffu
@@ -99,6 +104,24 @@ static uint32_t meta_lba(const uint8_t *m)
 
 /* ---- the page table cache ---------------------------------------------- */
 
+static int cache_records_valid(void)
+{
+    const uint64_t maxseq = (1ull << 48) - 1;
+    for (int die = 0; die < PPN_DIES; die++)
+        for (int blk = 0; blk < PPN_BLOCKS; blk++) {
+            const struct block_rec *b = &blocks[die][blk];
+            /* written is consumed as an array bound by build_l2p().
+             * A stale/corrupt cache is only a hint and must never let it
+             * walk past pages[die][blk][256]. */
+            if (b->written > PPN_PAGES || b->state > B_BAD || b->head_seq > maxseq)
+                return 0;
+            for (int pg = 0; pg < b->written; pg++)
+                if (pages[die][blk][pg].seq > maxseq)
+                    return 0;
+        }
+    return 1;
+}
+
 static int cache_load(void)
 {
     struct cache_hdr h;
@@ -108,7 +131,8 @@ static int cache_load(void)
     if (fread(&h, sizeof(h), 1, f) != 1 || memcmp(h.magic, "IOSNAND1", 8) ||
         h.dies != PPN_DIES || h.blocks != PPN_BLOCKS || h.pages != PPN_PAGES ||
         fread(blocks, sizeof(blocks), 1, f) != 1 ||
-        fread(pages, sizeof(*pages) * PPN_DIES, 1, f) != 1) {
+        fread(pages, sizeof(*pages) * PPN_DIES, 1, f) != 1 ||
+        !cache_records_valid()) {
         fclose(f);
         fprintf(stderr, "iosnand: %s unusable, starting over\n", cache_path);
         memset(blocks, 0, sizeof(blocks));
@@ -144,7 +168,9 @@ static uint8_t pbuf[PPN_PAGE_RAW] __attribute__((aligned(4)));
 
 static int read_raw(int die, int blk, int pg, uint32_t len, uint8_t *st)
 {
-    if (ppn_read_page(die >> 1, 0, PPN_ROW(die & 1, blk, pg), pbuf, len, st)) {
+    int ret = use_mtd ? mtd_backend_read(die, blk, pg, pbuf, len, st) :
+        ppn_read_page(die >> 1, 0, PPN_ROW(die & 1, blk, pg), pbuf, len, st);
+    if (ret) {
         fprintf(stderr, "iosnand: die %d block %d page %d: read failed (status 0x%02x)\n",
                 die, blk, pg, *st);
         return -1;
@@ -216,7 +242,11 @@ static int scan(int verbose)
             }
             uint64_t head = meta_seq(pbuf + PPN_META_OFF);
             int from = 0;
-            if (b->state == B_DATA && b->head_seq == head) {
+            /* PIO exposes physical 0x49 and its write pointer.  MTD only
+             * exposes readable FF data, so do not reuse the early-stop
+             * cache assumption there: full scans are slower but cannot
+             * hide pages appended after a previous all-FF tail. */
+            if (!use_mtd && b->state == B_DATA && b->head_seq == head) {
                 if (b->written == PPN_PAGES) {
                     kept++;
                     continue;
@@ -304,7 +334,9 @@ static int read_lba(uint32_t lba, uint8_t *out)
         unsigned slot = pcache_next++ % PCACHE;
         uint8_t st;
         pcache[slot].key = 0;
-        if (ppn_read_page(die >> 1, 0, PPN_ROW(die & 1, blk, pg), pcache[slot].data, PPN_PAGE_RAW, &st) ||
+        int ret = use_mtd ? mtd_backend_read(die, blk, pg, pcache[slot].data, PPN_PAGE_RAW, &st) :
+            ppn_read_page(die >> 1, 0, PPN_ROW(die & 1, blk, pg), pcache[slot].data, PPN_PAGE_RAW, &st);
+        if (ret ||
             !PPN_ST_OK(st)) {
             fprintf(stderr, "iosnand: LBA %u: die %d block %d page %d read failed (0x%02x)\n",
                     lba, die, blk, pg, st);
@@ -336,19 +368,34 @@ struct part {
 static struct part parts[12];
 static int nparts;
 
-static int lwvm_load(void)
+/* Decode only: kept separate from MMIO reads so malformed headers can be
+ * regression-tested offline.  A hole or duplicate is not a zero-filled
+ * allocation: accepting it would read another partition's NAND blocks. */
+static int lwvm_decode(const uint8_t h[4096])
 {
-    uint8_t h[4096];
     static const uint8_t magic[16] = { 0x6a, 0x90, 0x88, 0xcf, 0x8a, 0xfd, 0x63, 0x0a,
                                        0xe3, 0x51, 0xe2, 0x48, 0x87, 0xe0, 0xb9, 0x8b };
-    if (read_lba(0, h) || memcmp(h, magic, 16)) {
+    nparts = 0;
+    memset(parts, 0, sizeof(parts));
+    if (memcmp(h, magic, 16)) {
         fprintf(stderr, "iosnand: no LwVM header at LBA 0\n");
+        return -1;
+    }
+    uint64_t media_size;
+    memcpy(&media_size, h + 0x20, 8);
+    if (media_size != NLBA * 4096) {
+        fprintf(stderr, "iosnand: unsupported LwVM media size %llu (expected %llu)\n",
+                (unsigned long long)media_size, (unsigned long long)(NLBA * 4096));
         return -1;
     }
     uint32_t n;
     memcpy(&n, h + 0x28, 4);
+    if (!n || n > 12) {
+        fprintf(stderr, "iosnand: invalid LwVM partition count\n");
+        return -1;
+    }
     const uint8_t *map = h + 0x800;
-    for (uint32_t i = 0; i < n && i < 12; i++) {
+    for (uint32_t i = 0; i < n; i++) {
         struct part *p = &parts[i];
         const uint8_t *r = h + 0x200 + i * 0x80;
         uint64_t begin, end;
@@ -358,21 +405,46 @@ static int lwvm_load(void)
             p->name[c] = r[56 + 2 * c];
         p->name[36] = 0;
         p->nchunks = 0;
+        for (int c = 0; c < 1024; c++)
+            p->phys[c] = UINT16_MAX;
         for (int c = 0; c < 1024; c++) {
             uint16_t v = map[2 * c] | map[2 * c + 1] << 8;
             if (v == LWVM_HDR || v == LWVM_FREE || v >> 12 != i)
                 continue;
-            if ((v & 0xfff) < 1024)
-                p->phys[v & 0xfff] = c;
+            if ((v & 0xfff) >= 1024 || p->phys[v & 0xfff] != UINT16_MAX ||
+                (uint64_t)c * LWVM_CHUNK >= NLBA * 4096) {
+                fprintf(stderr, "iosnand: invalid or duplicate LwVM chunk\n");
+                return -1;
+            }
+            p->phys[v & 0xfff] = c;
             if ((v & 0xfff) + 1u > p->nchunks)
                 p->nchunks = (v & 0xfff) + 1;
         }
+        if (end <= begin || end > media_size || end - begin > p->nchunks * LWVM_CHUNK) {
+            fprintf(stderr, "iosnand: invalid LwVM partition size\n");
+            return -1;
+        }
         p->size = end - begin;
-        if (p->size > p->nchunks * LWVM_CHUNK)
-            p->size = p->nchunks * LWVM_CHUNK;
+        for (uint32_t c = 0; c < p->nchunks; c++) {
+            uint64_t used = p->size > c * LWVM_CHUNK ?
+                p->size - c * LWVM_CHUNK : 0;
+            if (used > LWVM_CHUNK)
+                used = LWVM_CHUNK;
+            if (p->phys[c] == UINT16_MAX ||
+                (uint64_t)p->phys[c] * LWVM_CHUNK + used > NLBA * 4096) {
+                fprintf(stderr, "iosnand: missing or out-of-range LwVM chunk\n");
+                return -1;
+            }
+        }
     }
-    nparts = n < 12 ? n : 12;
+    nparts = n;
     return 0;
+}
+
+static int lwvm_load(void)
+{
+    uint8_t h[4096];
+    return read_lba(0, h) ? -1 : lwvm_decode(h);
 }
 
 static struct part *part_by_name(const char *name)
@@ -387,6 +459,8 @@ static struct part *part_by_name(const char *name)
 static int read_part(struct part *p, uint64_t off, uint8_t *out, uint32_t len)
 {
     uint8_t b[4096];
+    if (off > p->size || len > p->size - off)
+        return -1;
     while (len) {
         uint64_t c = off / LWVM_CHUNK;
         if (c >= p->nchunks)
@@ -491,7 +565,8 @@ static int serve_one(struct export *e)
         int r = 0;
         if (len > sizeof(sbuf) && !(buf = malloc(len)))
             rp.error = htonl(ENOMEM);
-        else if (from + len > e->p->size || read_part(e->p, from, buf, len))
+        else if (from > e->p->size || len > e->p->size - from ||
+                 read_part(e->p, from, buf, len))
             rp.error = htonl(EIO);
         if (write_full(e->sock, &rp, sizeof(rp)) || (!rp.error && write_full(e->sock, buf, len)))
             r = -1;
@@ -572,12 +647,53 @@ static int serve(char **names, int n)
 
 /* ---- main ---------------------------------------------------------------- */
 
+static int parse_number(const char *s, uint32_t *value)
+{
+    char *end;
+    unsigned long long v;
+    if (!*s || *s == '-')
+        return -1;
+    errno = 0;
+    v = strtoull(s, &end, 0);
+    if (errno || *end || v > UINT32_MAX)
+        return -1;
+    *value = v;
+    return 0;
+}
+
+/* Check syntax and requested read bounds before ppn_open maps /dev/mem or
+ * scan reads a page.  A typo should never start a fifteen-minute scan. */
+static int check_args(int argc, char **argv, uint32_t *lba, uint32_t *n)
+{
+    if (argc < 2)
+        return -1;
+    if (!strcmp(argv[1], "scan") || !strcmp(argv[1], "parts"))
+        return argc == 2 ? 0 : -1;
+    if (!strcmp(argv[1], "serve"))
+        return argc <= 14 ? 0 : -1;
+    if (strcmp(argv[1], "read") || argc < 3 || argc > 4)
+        return -1;
+    *n = 1;
+    if (parse_number(argv[2], lba) || (argc == 4 && parse_number(argv[3], n)) ||
+        *lba > NLBA || *n > NLBA - *lba)
+        return -1;
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
-    if (argc < 2) {
+    uint32_t read_start = 0, read_count = 0;
+    int help = argc == 2 && (!strcmp(argv[1], "--help") || !strcmp(argv[1], "-h"));
+    if (help || check_args(argc, argv, &read_start, &read_count)) {
         fprintf(stderr, "usage: iosnand scan | parts | read LBA [N] | serve [PARTITION...]\n");
+        return help ? 0 : 1;
+    }
+    const char *backend = getenv("IOSNAND_BACKEND");
+    if (backend && strcmp(backend, "pio") && strcmp(backend, "mtd")) {
+        fprintf(stderr, "iosnand: IOSNAND_BACKEND must be pio or mtd\n");
         return 1;
     }
+    use_mtd = backend && !strcmp(backend, "mtd");
     if (getenv("IOSNAND_CACHE"))
         cache_path = getenv("IOSNAND_CACHE");
     pages = calloc(PPN_DIES, sizeof(*pages));
@@ -585,10 +701,21 @@ int main(int argc, char **argv)
         fprintf(stderr, "iosnand: out of memory\n");
         return 1;
     }
-    ppn_open();
-    for (int bus = 0; bus < PPN_BUSES; bus++)
-        if (!ppn_claim(bus))
+    if (use_mtd) {
+        if (mtd_backend_open()) {
+            fprintf(stderr, "iosnand: read-only MTD backend unavailable or wrong geometry; no PIO fallback\n");
             return 1;
+        }
+        atexit(mtd_backend_close);
+        for (int bus = 0; bus < PPN_BUSES; bus++)
+            if (!ppn_lock(bus))
+                return 1;
+    } else {
+        ppn_open();
+        for (int bus = 0; bus < PPN_BUSES; bus++)
+            if (!ppn_claim(bus))
+                return 1;
+    }
     if (cache_load())
         fprintf(stderr, "iosnand: no page cache yet: reading every page once, ~15 minutes\n");
     int changed = scan(1);
@@ -607,11 +734,10 @@ int main(int argc, char **argv)
                    (unsigned long long)(parts[i].size >> 20), parts[i].nchunks);
         return 0;
     }
-    if (!strcmp(argv[1], "read") && argc >= 3) {
-        uint32_t lba = strtoul(argv[2], NULL, 0), n = argc > 3 ? strtoul(argv[3], NULL, 0) : 1;
+    if (!strcmp(argv[1], "read")) {
         uint8_t b[4096];
-        for (uint32_t i = 0; i < n; i++)
-            if (read_lba(lba + i, b) || write_full(1, b, 4096))
+        for (uint32_t i = 0; i < read_count; i++)
+            if (read_lba(read_start + i, b) || write_full(1, b, 4096))
                 return 1;
         return 0;
     }

@@ -1,10 +1,20 @@
 # P105AP NAND — H2FMI + PPN, read-only bring-up
 
 **Rule for everything below:** the NAND holds the iPad's iOS install.  Nothing
-here programs or erases it.  `tools/nandctl.c` sends NAND opcodes only through
+here programs or erases it.  `tools/nand/ppn.c` gates ordinary commands through
 an allowlist (reset, read ID, status, PPN get-feature / device parameters /
-data out); program (80/10), erase (60/D0) and PPN set-features (EF) are not in
-it.
+data out); program (80/10) and erase (60/D0) are not in it.  There is a separate,
+restricted EF set-feature path for the volatile interface power state only:
+feature 0x180, values 1 (async) or 0x0a (DDR).  It is not a data-program path,
+but reset/interface changes can still disrupt the current session.
+
+**Current source update (2026-10-11):** a read-only kernel MTD driver now exists
+at `patches/files/drivers/mtd/devices/mtd-apple-h2fmi.c`.  It exports four dies,
+has no write/erase callbacks and no `MTD_WRITEABLE`, and gates all NAND commands
+through a read-only allowlist.  The dated measurements below describe upstream
+hardware, not the Firebat-connected iPad.  See
+[Linux storage assessment](p105-linux-storage.md) for the write-side blockers,
+offline parser corrections and persistence alternatives.
 
 ## Status (2026-09-27)
 
@@ -12,7 +22,7 @@ From Linux, over `/dev/mem`, both buses answer: read ID, PPN firmware version
 and the PPN device-parameter page, all matching what iOS reports.  Page reads
 work (PIO, 14.6 MB/s, measured 2026-09-29 with `nandctl dump` into tmpfs) and are
 bit-for-bit repeatable; the flash partition table reads back and decodes.
-No kernel driver yet, no FTL yet.
+At this dated bring-up point there was no kernel driver or writable FTL yet.
 
 That number used to read "through `nandctl dump` to the NFS root", which made it
 look like an NFS figure as much as a NAND one. It never was: `nandctl` times its

@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Apple S5L USB PHY driver (otgphyctrl,s5l8940x)
- * Register values taken from a live iBoot/DFU PHY dump on real hardware
- * (see docs/PHY-DUMP.md): OPHYPWR=0x6 OPHYCLK=0x1 UNK1_1C=0x6 UNK2_44=0xF8
- * UNK4_60=0x200 ORSTCON=0x0 -- these are the exact bits iBoot leaves set
- * while its own USB (DFU) is actively enumerated, i.e. known-working state.
+ * Upstream's live iBoot/DFU dump: OPHYPWR=0x6, OPHYCLK=0x1,
+ * U1C=0x6, UOTGTUNE1(+0x40)=0x549, UOTGTUNE2(+0x44)=0x2ff3,
+ * U60=0x200, ORSTCON=0x0.  Preserve that working peripheral state.
+ * The old +0x44=0xf8 claim was wrong and is not an initialization value.
+ * Exact 12H321 firmware maps tuning at +0x40/+0x44; see
+ * docs/research/p105-usb-host.md.  This driver does not enable external host
+ * mode or supply Lightning VBUS.
  */
 
 #include <linux/delay.h>
@@ -27,11 +30,6 @@
 #define OPHYCLK_CLKSEL_MASK		0x3
 #define OPHYCLK_CLKSEL_24MHZ		0x1
 #define ORSTCON_PHYSWRESET		BIT(0)
-
-/* Values as observed live from iBoot's working PHY state */
-#define OPHYUNK4_START			0x200
-#define OPHYUNK1_START			0x6
-#define OPHYUNK2_START			0xF8
 
 #define PMGR_BASE		0x3F100000
 #define PMGR_GATE_ON		0xF
@@ -71,14 +69,14 @@
 #define PMGR_USB_OHCI0		0x1090
 #define PMGR_USB_OHCI1		0x1094
 
-/* Tuning constants from ADT otgphyctrl node (device-mode values):
+/* Tuning constants from the actual P105 12H321 ADT:
  *   uotgtune1-device = 0x549, uotgtune2-device = 0x2ff3
+ *   uotgtune1-host   = 0x54f, uotgtune2-host   = 0x6df3
  *   ref-clock-sel    = 3
  *   usbhostset-en-incrx = 0xE0
- * Register offsets are guesses matching Samsung Exynos S5L OTG PHY layout
- * (which the Apple block is derived from). To be verified by XNU-hook dump. */
-#define OPHY_UOTGTUNE1		0x30
-#define OPHY_UOTGTUNE2		0x34
+ * AppleS5L8930XUSBPhy::enableHostMode in that firmware writes the tuning
+ * words to +0x40 and +0x44, not the unused guessed offsets +0x30/+0x34.
+ * Host routing and VBUS remain unverified: no tuning writes are added here. */
 
 /* The host side: EHCI and its HSIC port, where the Wi-Fi chip is.
  *
@@ -144,8 +142,8 @@ static void phy_dump_regs(struct s5l_usbphy *p, const char *tag)
 	 *   0x00 OPHYPWR    (was 0x6 from iBoot)
 	 *   0x04 OPHYCLK    (was 0x1 = 24MHz)
 	 *   0x08 ORSTCON    (was 0x0)
-	 *   0x1C OPHYUNK1   (was 0x6)   -- probably uotgtune1
-	 *   0x40 ???        (probe, might also be tuning)
+	 *   0x1C OPHYUNK1   (was 0x6; device-mode enable is bit 1 in XNU)
+	 *   0x40 UOTGTUNE1  (was 0x549 == ADT uotgtune1-device)
 	 *   0x44 OPHYUNK2   (was 0x2ff3 == ADT uotgtune2-device)
 	 *   0x60 OPHYUNK4   (was 0x200)
 	 * We keep 0x30 and 0x34 in the dump only to confirm they are unused
