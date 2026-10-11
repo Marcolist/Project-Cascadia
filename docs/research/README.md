@@ -44,6 +44,7 @@ Storage and USB evidence:
 - [Accessory rail callbacks and ID-derived voltage](p105-accessory-power.md)
 - [Accessory switch GPIO descriptor and simulated provider](p105-accessory-gpio.md)
 - [SoC GPIO mux-mask comparison and remaining policy differences](p105-soc-gpio-masks.md)
+- [VBUS presence sensing and the missing 5 V provider](p105-vbus-presence.md)
 
 Run `python3 scripts/test-offline.py` from the repository root. It runs all
 `tests/test*.py` entry points, including names with hyphens. C fixtures use a
