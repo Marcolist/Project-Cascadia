@@ -17,8 +17,8 @@ test. The normal boot procedure remains [QUICKSTART](../QUICKSTART.md).
 | Area | Implemented and tested offline | Still unresolved |
 | --- | --- | --- |
 | Battery/PMU | Atomic HDQ cache, valid percentage range, break failure handling, discharge status, GPIO errors, removal of event-consuming probe dump | Complete charger initialization, battery/fault protection, voltage/termination policy and hardware verification |
-| NAND | Read progress/ECC errors, explicit read-only MEMREAD backend, strict metadata/cache checks, reduced mapper memory, NBD bounds/setup/worker cleanup, pidfd control and generation-bound System readiness | Actual process/sysfs hardware integration, target capacity/performance, writable PPN/FTL and Linux-owned storage |
-| USB | Host-only build/link, bounded ADT parser, PHY power-error handling, isolated HID/storage profile | Complete connector routing, external 5 V VBUS/protection, role transitions and real peripherals |
+| NAND | Read progress/ECC errors, explicit read-only MEMREAD backend with exact sysfs/device identity, strict metadata/cache checks, reduced mapper memory, NBD bounds/setup/worker cleanup, pidfd control and generation-bound System readiness | Actual process/sysfs hardware integration, target capacity/performance, writable PPN/FTL and Linux-owned storage |
+| USB | Host-only build/link, bounded ADT parser, PHY power-error handling, two-bit GPIO selector masks, isolated HID/storage profile | Complete connector routing, external 5 V VBUS/protection, role transitions and real peripherals |
 
 Charging evidence:
 
@@ -29,6 +29,7 @@ Charging evidence:
 - [Input-current backoff, stored cap and deadline](p105-source-backoff.md)
 - [Charging status and blocked recovery paths](p105-charge-status.md)
 - [ADC identities and scaling with acquisition blocked](p105-d1946-adc.md)
+- [ADC completion, IRQ and quiesce with fake I/O](p105-d1946-adc-lifecycle.md)
 - [USB gadget budget integration gap](p105-usb-charge-budget.md)
 - [Host current-offset request receiver](p105-usb-current-request.md)
 
