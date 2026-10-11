@@ -169,7 +169,20 @@ int main(void) {
  assert(hdq_get_property(&psy,POWER_SUPPLY_PROP_TEMP,&value)==0 && value.intval==250);
  assert(hdq_get_property(&psy,(enum power_supply_property)999,&value)==-EINVAL);
  assert(!b.lock.locked);
- puts("HDQ battery: framing/timeouts, nine injected read failures, cache/wraparound, units and lock scope passed");
+ /* Reject an invalid percentage instead of publishing a corrupt sample. */
+ unsigned invalid_soc[] = { 101, 65535 };
+ for (unsigned i=0; i<ARRAY_SIZE(invalid_soc); i++) {
+  b=battery(); struct hdq_battery old=b; psy.data=&b;
+  reset_sample(); new_sample[0]=invalid_soc[i]; jiffies=5*HZ; value.intval=1234;
+  assert(hdq_get_property(&psy,POWER_SUPPLY_PROP_CAPACITY,&value)==-ERANGE);
+  assert(value.intval==1234 && !memcmp(&b,&old,sizeof(b)));
+ }
+ for (unsigned percent=0; percent<=100; percent+=100) {
+  b=battery(); psy.data=&b; reset_sample(); new_sample[0]=percent; jiffies=5*HZ;
+  assert(hdq_get_property(&psy,POWER_SUPPLY_PROP_CAPACITY,&value)==0);
+  assert(value.intval==(int)percent && b.valid && calls==9 && !b.lock.locked);
+ }
+ puts("HDQ battery: framing/timeouts, nine injected read failures, cache/wraparound, SOC bounds, units and lock scope passed");
 }
 '''
     with tempfile.TemporaryDirectory(prefix='cascadia-hdq-test-') as temp:

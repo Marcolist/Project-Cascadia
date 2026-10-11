@@ -138,6 +138,9 @@ static int hdq_refresh(struct hdq_battery *b)
 			dev_warn_ratelimited(b->dev, "no answer for %#x\n", r[i].reg);
 			return v;
 		}
+		/* Capacity's power-supply ABI is a percentage, never raw noise. */
+		if (r[i].reg == BQ_SOC && v > 100)
+			return -ERANGE;
 		sample[i] = v;
 	}
 	/* Do not publish a partial sample if a later HDQ transaction fails. */
