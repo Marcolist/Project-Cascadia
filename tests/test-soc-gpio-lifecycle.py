@@ -5,12 +5,13 @@ Compile current runtime source unchanged and a hash-pinned historical control.
 The MMIO, descriptor lookup, ownership locks and module references are simulated.
 No hardware, source downloads or production driver writes occur.
 Set CASCADIA_LINUX_SOURCE to a locally available pinned Linux 6.12 tree when
-build/linux is absent. Historical S5L bytes are reconstructed from the pinned upstream Git object
-1118174 plus a hash-pinned selector-mask-only fixture patch. No baseline
+build/linux is absent. Historical S5L bytes come from a pinned upstream blob
+available in the base tree even when its earlier commit is absent in a shallow
+clone, plus a hash-pinned selector-mask-only fixture patch. No baseline
 callback is reimplemented or derived by reversing the candidate input fix.
 """
 from pathlib import Path
-import hashlib,importlib.util,re,subprocess,tempfile,unittest
+import hashlib,importlib.util,os,re,subprocess,tempfile,unittest
 
 REPO=Path(__file__).resolve().parents[1]
 SOURCE=REPO/'patches/files-sandcastle-port/drivers/pinctrl/pinctrl-s5l8940x-gpio.c'
@@ -25,6 +26,21 @@ HASHES={
  'include/linux/irq.h':'fdc47c7ebc4ba2e561fef2930140a44419f4a6c6b6568372ccb7cb30e41a08b2',
  'include/linux/gpio/machine.h':'7992f9786fb0359cb596e1440c5423580b62954e06833928aaa2f87248709ff0',
 }
+GPIO_BLOB='b38607939ad5cc668d0551772945b1000a189837'
+GPIO_BASELINE_SHA='e71fc77818ad2a6358b55ee8233da79c30b2f88985decd9e34bcadb01456c53f'
+
+def historical_gpio_blob(repo=REPO):
+ # Full or shallow base-tree clones carry the same file object. An absent
+ # object is an explicit source prerequisite. Request no lazy fetching and
+ # independently forbid transport, including on older Git implementations.
+ result=subprocess.run(['git','-c','protocol.allow=never','-C',str(repo),
+                        'cat-file','blob',GPIO_BLOB],capture_output=True,
+                       check=False,timeout=30,
+                       env=dict(os.environ,GIT_NO_LAZY_FETCH='1'))
+ if result.returncode or hashlib.sha256(result.stdout).hexdigest()!=GPIO_BASELINE_SHA:
+  raise ValueError('requires local pinned upstream S5L blob '+GPIO_BLOB+'; network transport disabled')
+ return result.stdout
+
 def extract(text,name):return baseline.extract(text,name)
 def enum(text,name):
  start=text.index('enum '+name+' {');end=text.index('};',start)+2
@@ -33,11 +49,7 @@ def harness(legacy=False):
  sources={name:baseline.baseline_source(name,sha).decode() for name,sha in HASHES.items()}
  driver=SOURCE.read_text()
  if legacy:
-  archived=subprocess.run(['git','-c','protocol.allow=never','-C',str(REPO),'show',
-      '1118174a1d19ecc10ce1bc43b33a452dc7bb48e6:patches/files-sandcastle-port/drivers/pinctrl/pinctrl-s5l8940x-gpio.c'],
-       capture_output=True,check=True,timeout=30).stdout
-  if hashlib.sha256(archived).hexdigest()!='e71fc77818ad2a6358b55ee8233da79c30b2f88985decd9e34bcadb01456c53f':
-   raise ValueError('requires exact pinned upstream S5L source')
+  archived=historical_gpio_blob()
   fixture=REPO/'tests/fixtures/soc-gpio-mux-only.patch'
   if hashlib.sha256(fixture.read_bytes()).hexdigest()!='f8563b2727be5035f4a1995bd8663d205b164a793487f0e47dfd58b3ea06e78e':
    raise ValueError('historical selector-mask-only fixture SHA256 mismatch')
@@ -354,5 +366,25 @@ class Lifecycle(unittest.TestCase):
  assert(write_offsets[count-1]==0x840 && writes[count-1]==(1u<<22));
  assert(!test_bit(FLAG_IS_OUT,&d.flags));gpiod_free_commit(&d);assert(!module_refs);
 ''',legacy=True)
+
+
+ def test_historical_blob_control_needs_no_commit_or_parent_history(self):
+  actual=historical_gpio_blob()
+  with tempfile.TemporaryDirectory(prefix='gpio-blob-only-') as directory:
+   subprocess.run(['git','init','--quiet',directory],check=True,capture_output=True,timeout=30)
+   result=subprocess.run(['git','-C',directory,'hash-object','-w','--stdin'],input=actual,
+                         check=True,capture_output=True,timeout=30)
+   self.assertEqual(result.stdout.decode().strip(),GPIO_BLOB)
+   for commit in ('1118174a1d19ecc10ce1bc43b33a452dc7bb48e6',
+                  'a9bf28f20e5ce908fd5805e7d58b3ce9d9f0e4cf'):
+    self.assertNotEqual(subprocess.run(['git','-c','protocol.allow=never','-C',directory,
+                                      'cat-file','-e',commit],capture_output=True,timeout=30).returncode,0)
+   self.assertEqual(historical_gpio_blob(directory),actual)
+
+ def test_absent_pinned_local_blob_is_refused_with_network_transport_disabled(self):
+  with tempfile.TemporaryDirectory(prefix='gpio-blob-missing-') as directory:
+   subprocess.run(['git','init','--quiet',directory],check=True,capture_output=True,timeout=30)
+   with self.assertRaisesRegex(ValueError,'requires local pinned.*network transport disabled'):
+    historical_gpio_blob(directory)
 
 if __name__=='__main__':unittest.main()

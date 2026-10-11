@@ -102,9 +102,22 @@ The upstream input acquisition is visible in
 ## Historical control, provenance and reproduction
 
 The separate [lifecycle fixture](../../tests/test-soc-gpio-lifecycle.py) reads
-the exact original S5L source from upstream Git commit
-`1118174a1d19ecc10ce1bc43b33a452dc7bb48e6`, SHA256
+the exact original S5L source from upstream Git blob
+`b38607939ad5cc668d0551772945b1000a189837`, SHA256
 `e71fc77818ad2a6358b55ee8233da79c30b2f88985decd9e34bcadb01456c53f`.
+This object is the GPIO file in both earlier upstream commit
+`1118174a1d19ecc10ce1bc43b33a452dc7bb48e6` and project base
+`a9bf28f20e5ce908fd5805e7d58b3ce9d9f0e4cf`. The test reads the blob directly
+with `git cat-file blob`, requests disabled lazy fetching with
+`GIT_NO_LAZY_FETCH=1`, and forbids transports using `protocol.allow=never`.
+No network transport is allowed; a missing pinned local blob fails explicitly.
+The earlier commit need not exist in a shallow base clone. An actual local
+depth-one clone of the base lacks that commit, but returns the same verified
+blob bytes. A shallow clone of a later changed tree may lack the original blob;
+that remains an explicit local-source prerequisite; no network retrieval is
+permitted. The transport restriction also applies on older Git implementations
+without the lazy-fetch environment option.
+
 It applies the separate hash-pinned selector-mask-only fixture
 [patch](../../tests/fixtures/soc-gpio-mux-only.patch) inside a temporary directory,
 then verifies the exact historical post-mask source SHA256
@@ -119,12 +132,13 @@ is handwritten and the candidate input edit is never inverted to create it. Each
 input is independently hash-pinned and obtained from a local pristine source
 or the original Linux Git object. No download or checkout mutation occurs.
 
-Ten unittest methods cover the explicit-input defect and exact historical
+Twelve unittest methods cover the explicit-input defect and exact historical
 control, the corresponding ASIS/IRQ-startup defect and historical control,
 ASIS/free preservation including unknown `0x40`, unchanged HSIC-shaped output,
 explicit peripheral-to-input transition, IRQ-cache/upper-field/active-low
 preservation, unchanged normal input and duplicate-request rejection, and
-pre-callback failure with owned cleanup. C compiles with warnings as errors
+pre-callback failure with owned cleanup, commit-free blob retrieval and
+explicit missing-blob rejection. C compiles with warnings as errors
 (except an existing unused callback parameter) and undefined-behavior checking.
 
 ```sh
@@ -132,7 +146,7 @@ python3 tests/test-soc-gpio-lifecycle.py -v
 python3 tests/test_soc_gpio_masks.py -v
 ```
 
-Recorded verification: ten lifecycle methods pass with no skips on the local
+Recorded verification: twelve lifecycle methods pass with no skips on the local
 host and in the existing Ubuntu 22 image with networking disabled. The nine
 existing mask/firmware methods also pass with no skips in that image, using the
 verified 12H321 kernelcache. The new lifecycle suite itself needs no firmware
