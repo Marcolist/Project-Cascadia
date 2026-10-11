@@ -296,6 +296,55 @@ test cover both cases. The first attempt's log is
 `../logs/night/iosnand-arm-build.log`; final ARM rebuild results belong in the
 main build report.
 
+### Bind an MTD node to its exact sysfs device number
+
+A strict fake-FS regression of the original production `mtd_backend_open`
+accepted `/dev/mtd0` and `/dev/mtd1` with their character-device minors swapped:
+both still reported major 90, the same fixed geometry and read-only flags.
+That selected the wrong physical die for the sysfs `apple-nandN` label; geometry
+and name checks alone did not bind the opened node to the chosen kernel MTD.
+No real device was opened or read for this reproduction.
+
+The exact pinned Linux v6.12
+[`mtdcore` MTD_DEVT and registration](https://github.com/torvalds/linux/blob/adc218676eef25575469234709c2d87185ca223a/drivers/mtd/mtdcore.c#L87)
+assign `dev.devt = MKDEV(MTD_CHAR_MAJOR, index*2)`; `MTD_CHAR_MAJOR` is 90.
+[`mtdchar_open`](https://github.com/torvalds/linux/blob/adc218676eef25575469234709c2d87185ca223a/drivers/mtd/mtdchar.c#L45)
+selects the actual MTD with `iminor(inode)>>1`, independent of the filename.
+The backend now reads the selected sysfs `dev` attribute, strictly parses its
+unsigned major:minor fields with overflow/round-trip checks, and requires
+`fstat(opened_node).st_rdev` to equal that exact device number. A missing,
+malformed, wrong-major or mismatched device is refused; there is no redirection
+to another node or fallback to PIO. Existing geometry/type/read-only checks
+remain required. This binds discovery to the actual node, without claiming
+a lease against subsequent privileged kernel/device reconfiguration.
+
+`tests/test-iosnand-mtd-open.py` exercises **31 production discovery/binding
+cases twice**, under modern and simulated pre-MEMREAD headers, with strict fake
+directory/node/stat/ioctl calls and in-process memory streams for sysfs text.
+Correct four-die mapping succeeds; swapped minors, wrong major, noncharacter
+nodes, writable flags, duplicate names and missing/malformed/overflowing dev
+attributes fail and close every opened fake FD. Character/rdev mismatch reports
+ENODEV, invalid geometry/text EINVAL, and actual stat/ioctl/read/close errors
+survive cleanup instead of misleading "Success" diagnostics. Missing dies,
+malformed size text and truncated attributes are also covered. No sysfs/device file or real
+ioctl is used. The existing 25 layout/error tests still pass under both headers.
+
+The read-only boundary is software-defined: the H2FMI driver sets only
+MTD_NO_ERASE, has no MTD_WRITEABLE flag, and registers read_oob/block_isbad,
+with no write, erase or block_markbad callbacks. The v6.12 MTD open path refuses
+write opens; core
+[`erase`](https://github.com/torvalds/linux/blob/adc218676eef25575469234709c2d87185ca223a/drivers/mtd/mtdcore.c#L1375),
+[`write_oob`](https://github.com/torvalds/linux/blob/adc218676eef25575469234709c2d87185ca223a/drivers/mtd/mtdcore.c#L1742)
+and markbad paths check flags/callback availability. Its hardware-command
+allowlist contains only reset/status/read/end-of-read opcodes. MEMGETBADBLOCK
+uses a status read, not a markbad operation. The userspace MTD adapter issues
+only MEMGETINFO, MEMREAD and MEMGETBADBLOCK, all on O_RDONLY descriptors.
+This does not prove that opaque PPN firmware never performs internal
+maintenance in response to a read; that requires hardware documentation and
+validation. PIO tools remain a separate /dev/mem interface whose cooperative
+lock does not arbitrate arbitrary MTD users, and are unchanged by this fix.
+No writable callback, opcode, permission or PPN feature-state function was added.
+
 ### Kernel MEMREAD progress, ECC reporting and cleanup errors
 
 A second offline review found a real cross-layer liveness bug. The H2FMI
@@ -618,6 +667,7 @@ python3 tests/test-nand-ftl-scan.py -v
 python3 tests/test-iosnand-parse.py
 python3 tests/test-iosnand-cache.py
 python3 tests/test-iosnand-mtd.py
+python3 tests/test-iosnand-mtd-open.py
 python3 tests/test-h2fmi-read.py
 python3 tests/test-iosnand-nbd.py
 python3 tests/test-iosnand-lifecycle.py

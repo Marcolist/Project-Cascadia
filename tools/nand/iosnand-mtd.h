@@ -6,6 +6,7 @@
 #ifndef IOSNAND_MTD_H
 #define IOSNAND_MTD_H
 #include <dirent.h>
+#include <ctype.h>
 #include <limits.h>
 #include <mtd/mtd-abi.h>
 #include <stddef.h>
@@ -69,16 +70,48 @@ static int mtd_geometry_ok(const struct mtd_info_user *info, uint64_t size)
 static int mtd_sysfs_text(const char *entry, const char *attribute, char *buf, size_t len)
 {
     char path[PATH_MAX];
-    if (snprintf(path, sizeof(path), "/sys/class/mtd/%s/%s", entry, attribute) >= (int)sizeof(path))
+    if (!len || len > INT_MAX) { errno = EINVAL; return -1; }
+    if (snprintf(path, sizeof(path), "/sys/class/mtd/%s/%s", entry, attribute) >= (int)sizeof(path)) {
+        errno = ENAMETOOLONG;
         return -1;
+    }
     FILE *f = fopen(path, "r");
     if (!f)
         return -1;
+    errno = 0;
     int ok = fgets(buf, len, f) && (feof(f) || strchr(buf, '\n'));
-    fclose(f);
-    if (!ok)
-        return -1;
+    int saved = errno, read_error = ferror(f);
+    int closed = fclose(f);
+    if (!ok) { errno = read_error && saved ? saved : EINVAL; return -1; }
+    if (closed) return -1;
     buf[strcspn(buf, "\r\n")] = 0;
+    return 0;
+}
+
+/* The mtdchar minor selects index>>1, not the sysfs name. Geometry alone
+ * cannot distinguish two identical dies when a device node is misbound. */
+static int mtd_sysfs_dev(const char *entry, dev_t *device)
+{
+    char text[64], *end;
+    if (mtd_sysfs_text(entry, "dev", text, sizeof(text))) return -1;
+    if (!isdigit((unsigned char)text[0])) { errno = EINVAL; return -1; }
+    errno = 0;
+    unsigned long maj = strtoul(text, &end, 10);
+    if (errno || *end != ':' || !isdigit((unsigned char)end[1])) {
+        if (!errno) errno = EINVAL;
+        return -1;
+    }
+    unsigned long min = strtoul(end + 1, &end, 10);
+    if (errno || *end || maj > UINT_MAX || min > UINT_MAX) {
+        if (!errno) errno = EINVAL;
+        return -1;
+    }
+    dev_t expected = makedev(maj, min);
+    if (major(expected) != maj || minor(expected) != min || maj != 90) {
+        errno = EINVAL;
+        return -1;
+    }
+    *device = expected;
     return 0;
 }
 
@@ -114,33 +147,46 @@ static int mtd_backend_open(void)
         }
         if (die < 0)
             continue;
-        if (mtd_fds[die] >= 0 || mtd_sysfs_text(entry->d_name, "size", size_text, sizeof(size_text)))
-            goto out;
+        if (mtd_fds[die] >= 0) { errno = EINVAL; goto out; }
+        if (mtd_sysfs_text(entry->d_name, "size", size_text, sizeof(size_text))) goto out;
         errno = 0;
         uint64_t size = strtoull(size_text, &end, 10);
-        if (errno || !*size_text || *size_text == '-' || *end)
+        if (errno || !*size_text || *size_text == '-' || *end) {
+            if (!errno) errno = EINVAL;
             goto out;
-        if (snprintf(path, sizeof(path), "/dev/%s", entry->d_name) >= (int)sizeof(path))
+        }
+        if (snprintf(path, sizeof(path), "/dev/%s", entry->d_name) >= (int)sizeof(path)) {
+            errno = ENAMETOOLONG;
             goto out;
+        }
+        dev_t expected_device;
+        if (mtd_sysfs_dev(entry->d_name, &expected_device)) goto out;
         int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
         if (fd < 0)
             goto out;
         mtd_fds[die] = fd;
         struct stat st;
         struct mtd_info_user info;
-        if (fstat(fd, &st) || !S_ISCHR(st.st_mode) || major(st.st_rdev) != 90 ||
-            IOSNAND_IOCTL(fd, MEMGETINFO, &info) || !mtd_geometry_ok(&info, size))
+        if (fstat(fd, &st)) goto out;
+        if (!S_ISCHR(st.st_mode) || st.st_rdev != expected_device) {
+            errno = ENODEV;
             goto out;
+        }
+        int status = IOSNAND_IOCTL(fd, MEMGETINFO, &info);
+        if (status < 0) goto out;
+        if (status > 0) { errno = EIO; goto out; }
+        if (!mtd_geometry_ok(&info, size)) { errno = EINVAL; goto out; }
     }
     for (int die = 0; die < PPN_DIES; die++)
-        if (mtd_fds[die] < 0)
-            goto out;
+        if (mtd_fds[die] < 0) { errno = ENODEV; goto out; }
     result = 0;
-out:
-    closedir(directory);
-    if (result)
-        mtd_backend_close();
-    return result;
+out: {
+        int saved = errno;
+        closedir(directory);
+        if (result) mtd_backend_close();
+        errno = saved;
+        return result;
+    }
 }
 
 static int mtd_backend_read(int die, int block, int page, uint8_t *raw, uint32_t len, uint8_t *status)
