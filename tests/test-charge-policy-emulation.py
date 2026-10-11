@@ -108,6 +108,43 @@ class ChargePolicy(unittest.TestCase):
                 self.assertEqual(self.m.InputBudget(self.data).sample_budget(5, **arguments)
                                  ['computed_budget_mA'], expected)
 
+    def test_handshake_allow_failure_and_unknown_flags(self):
+        p = self.m.USBControl(self.data)
+        for flag, inhibit, failure, action in ((0x40000, 1, 0, 'whole-source replan'),
+                                               (0x80000, 0, 0, 'debounce'),
+                                               (0x100000, 1, 1, 'whole-source replan')):
+            with self.subTest(flag=flag):
+                sample = p.control(flag)
+                self.assertEqual(sample['return_code'], 0)
+                self.assertEqual(sample['source_inhibit_byte130'], inhibit)
+                self.assertEqual(sample['handshake_failure_byte132'], failure)
+                self.assertEqual([c['mocked'] for c in sample['calls']], [action])
+        before = p.control(0)
+        after = p.control(0x80000000)
+        self.assertEqual(after['source_inhibit_byte130'], before['source_inhibit_byte130'])
+        self.assertEqual(after['handshake_failure_byte132'], before['handshake_failure_byte132'])
+        self.assertEqual(after['calls'], [])
+
+    def test_usb_classification_change_invalidates_old_budget(self):
+        p = self.m.USBControl(self.data)
+        s = self.m.d1946.SOURCE
+        p.mu.mem_write(s + 0x106, b'\x07')
+        p.w32(s + 0x160, 2100)
+        p.w32(s + 0x168, 3)
+        p.w32(s + 0x178, 4)
+        sample = p.control(3)
+        self.assertEqual(sample['profile_enum106'], 4)
+        self.assertEqual(sample['usb_report_mA'], 100)
+        self.assertEqual(sample['usb_type'], 0)
+        self.assertEqual(sample['brick_index'], 0)
+        self.assertEqual([c['reason'] for c in sample['calls'] if 'actual' in c], [1])
+        self.assertEqual(p.sample_budget(4)['computed_budget_mA'], 0)
+
+    def test_unchanged_usb_classification_does_not_reset(self):
+        p = self.m.USBControl(self.data)
+        p.mu.mem_write(self.m.d1946.SOURCE + 0x142, b'\x03')
+        self.assertEqual(p.control(3)['calls'], [])
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

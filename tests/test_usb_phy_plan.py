@@ -51,6 +51,17 @@ class PhyPlanTests(unittest.TestCase):
         self.assertEqual(rails[0]["enable_mask"], "0x4")
         self.assertEqual(rails[1]["enable_register"], "0x26")
         self.assertFalse(rails[0]["is_verified_5v_vbus_source"])
+        tristar = result["tristar_identification_evidence"]
+        self.assertEqual(tristar["instance_vtable"], "0x80889298")
+        self.assertEqual(tristar["id_report"]["ioaccessory_manager_target"], "0x807139b8")
+        self.assertEqual(tristar["usb_dock_bridge"]["instance_vtable"], "0x80888998")
+        self.assertEqual(tristar["usb_dock_bridge"]["target_thumb"], "0x8088586d")
+        self.assertFalse(tristar["usb_dock_bridge"]["complete_power_permission_policy_verified"])
+        self.assertEqual(tristar["id_response"]["register_read_bytes"], 7)
+        self.assertFalse(tristar["camera_adapter_id_known"])
+        self.assertFalse(tristar["data_routing_modes_are_adapter_ids"])
+        unknown = [t for t in tristar["state_transitions"] if t["status"].startswith("UNRESOLVED")]
+        self.assertEqual(len(unknown), 2)
         delays = [step for step in result["observed_enable_host"] if step["operation"] == "delay_us"]
         self.assertEqual([step["value"] for step in delays], [20, 1000])
         for step in delays:

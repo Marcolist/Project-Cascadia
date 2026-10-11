@@ -292,6 +292,43 @@ test cover both cases. The first attempt's log is
 `../logs/night/iosnand-arm-build.log`; final ARM rebuild results belong in the
 main build report.
 
+### Kernel MEMREAD progress, ECC reporting and cleanup errors
+
+A second offline review found a real cross-layer liveness bug. The H2FMI
+`_read_oob` path previously returned `-EBADMSG` before incrementing either
+`ops.retlen` or `ops.oobretlen` on retired/other unreadable pages. Linux v6.12
+[`mtdchar_read_ioctl`](https://github.com/torvalds/linux/blob/adc218676eef25575469234709c2d87185ca223a/drivers/mtd/mtdchar.c#L758)
+allows ECC errors and loops until those lengths advance. A consistently bad
+page therefore produced repeated reads of the same address with no progress.
+A harness compiling the **actual driver, mtdcore wrapper and mtdchar loop**
+reproduced two identical attempts for statuses 0x45 and 0x41; an offline
+watchdog returned `ELOOP` on attempt two to avoid hanging the test.
+
+The fixed driver consumes a physically completed page's requested data/OOB,
+counts its failure in the request and returns a sticky `-EBADMSG` even when
+later pages are good. This matches the MTD progress contract; unreadable
+bytes are explicitly marked failed. Transport/PIO/status/end-command failures
+still abort immediately and do not split an old raw page into caller buffers.
+`iosnand`'s actual MTD adapter was tested through this same emulated MEMREAD
+path: unreadable page bytes never reach its caller; a proven retired block can
+be skipped, and corrected/refresh pages remain readable.
+
+The end-of-operation command previously discarded its timeout result after
+otherwise successful reads. It now propagates that failure and preserves an
+earlier transport error when both fail; chip deselection and controller-state
+cleanup still execute. Per-die diagnostic counters use a small lock, and the
+request retains failures, refresh counts and its maximum refresh marker across
+mixed pages. Status 0x42 supplies only the existing **minimal sentinel 1**,
+not an observed exact number of corrected bits. No write, erase, refresh
+programming or new opcode is introduced.
+
+Remaining code-review limits: individual hardware polls are bounded but use
+zero-delay busy loops (100 ms for command/PIO, 2 s for status); successful
+cleanup does not prove an electrically wedged bus recovered. Kernel bus mutexes
+cannot serialize unrelated `/dev/mem` clients. The driver still relies on
+inherited iBoot timing/clock state and fixed upstream geometry. These remain
+hardware/architecture questions; no raw recovery sequence was executed here.
+
 ## Validation and limits
 
 ```sh
@@ -299,11 +336,15 @@ python3 tests/test-nand-ftl-scan.py -v
 python3 tests/test-iosnand-parse.py
 python3 tests/test-iosnand-cache.py
 python3 tests/test-iosnand-mtd.py
+python3 tests/test-h2fmi-read.py
 ```
 
 Results: 22 Python binary-fixture/CLI tests, 36 C production-parser/bounds
 cases, 26 production v2-cache/exact-sequence cases and 25 fake-ioctl MTD layout/error/geometry cases pass (the last group
-runs with both modern and simulated pre-MEMREAD build headers). The C harnesses
+runs with both modern and simulated pre-MEMREAD build headers). In addition,
+21 actual H2FMI/MEMREAD/adapter integration cases pass. This harness imports
+only the exact local v6.12 MTD UAPI header and production functions, so old
+system headers are not replaced. The C harnesses
 run with AddressSanitizer and UndefinedBehaviorSanitizer, do not link `ppn.c`,
 and abort if a test reaches any PPN open/claim/read/lock stub. The production
 `scan_block` test finds a valid page after an all-FF page and reads all 256 pages.

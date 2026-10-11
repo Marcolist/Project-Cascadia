@@ -149,6 +149,53 @@ class Experiment:
                 'arg1_boolean': raw[0], 'arg2_boolean': raw[4], 'arg3_boolean': raw[8],
                 'reason': reason or None, 'transactions': self.transactions}
 
+    def criteria(self, status_bytes, qualifier=False):
+        """Execute actual source criteria getter with fake OSSet allocation.
+
+        Only USB/FireWire symbolic membership is proved by this method.
+        It does not detect Tristar, emulate attach IRQs or negotiate USB power.
+        """
+        if len(status_bytes) != 6:
+            raise ValueError('exactly six synthetic status bytes required')
+        members = []
+        set_object, set_vtable, set_add = SOURCE + 0x4000, SOURCE + 0x5000, TRAPS + 0x10
+        if not hasattr(self, '_criteria_hooks'):
+            self.mu.mem_map(0x804da000, 0x4000)
+            # Imported symbol slots interned by AppleARMPlatform0x804c8558.
+            self.w32(0x804db00c, SOURCE + 0x8000)
+            self.w32(0x804db010, SOURCE + 0x8004)
+            self.w32(set_object, set_vtable)
+            self.w32(set_vtable + 0x74, set_add | 1)
+            self.mu.mem_write(set_add, b'\x70\x47')
+
+            def set_api(mu, address, size, user):
+                if address == 0x80ed1f9c:
+                    if mu.reg_read(UC_ARM_REG_R0) != 1:
+                        raise RuntimeError('unexpected OSSet capacity')
+                    mu.reg_write(UC_ARM_REG_R0, set_object)
+                elif address == set_add:
+                    if mu.reg_read(UC_ARM_REG_R0) != set_object:
+                        raise RuntimeError('unexpected OSSet object')
+                    symbol = mu.reg_read(UC_ARM_REG_R1)
+                    names = {SOURCE + 0x8000: 'USB', SOURCE + 0x8004: 'FireWire'}
+                    if symbol not in names:
+                        raise RuntimeError('unexpected OSSet symbol')
+                    self._criteria_members.append(names[symbol])
+                    mu.reg_write(UC_ARM_REG_R0, 1)
+                else:
+                    raise RuntimeError('unexpected OSSet stub')
+                mu.reg_write(UC_ARM_REG_PC, mu.reg_read(UC_ARM_REG_LR))
+
+            self._criteria_hooks = [self.mu.hook_add(UC_HOOK_CODE, set_api, begin=a, end=a)
+                                    for a in (0x80ed1f9c, set_add)]
+        self._criteria_members = members
+        self.registers[0x0a:0x10] = bytes(status_bytes)
+        result = self.call(0x80ed0b70, int(qualifier))
+        if result != set_object:
+            raise RuntimeError('unexpected source-criteria return object')
+        return {'synthetic_status_hex': bytes(status_bytes).hex(), 'qualifier': bool(qualifier),
+                'criteria': list(members), 'transactions': list(self.transactions)}
+
 
 def experiment(data, kind, requested, control=0xbf):
     e = Experiment(data, initial_charge_control=control)
@@ -187,7 +234,7 @@ def main():
               'limitations': ['not a complete charger policy or hardware simulation',
                               'register semantics require device validation',
                               'no analog protection, attach detection or IRQ emulation'],
-              'experiments': [], 'status_experiments': []}
+              'experiments': [], 'status_experiments': [], 'criteria_experiments': []}
     try:
         for kind in ('charge', 'input'):
             for current in currents:
@@ -197,6 +244,10 @@ def main():
         output['experiments'].append(experiment(data, 'charge', 2520, control=0x9f))
         for mask in (0, 1, 2, 4, 8, 16, 32, 64, 128, 255):
             output['status_experiments'].append(Experiment(data).status((0, mask, 0, 0, 0, 0)))
+        for usb_status in (0, 8, 64, 72):
+            for qualifier in (False, True):
+                output['criteria_experiments'].append(Experiment(data).criteria(
+                    (usb_status, 0, 0, 0, 0, 0), qualifier))
     except (UcError, RuntimeError) as exc:
         p.error(f'emulation failed: {exc}')
     print(json.dumps(output, indent=2))

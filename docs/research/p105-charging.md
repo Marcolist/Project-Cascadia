@@ -209,10 +209,10 @@ These numbers are firmware arithmetic under mocked conditions. They are not
 measured charging rates, acceptable host power budgets, recommended settings,
 or a complete simulation of the analog charger.
 
-Ten firmware regression tests cover temperature-table preservation, both
+Twelve firmware regression tests cover temperature-table preservation, both
 current ceilings, control-bit behavior, low-current mode, compensation and
 rejection of the wrong kernelcache, including failed-read observations and
-the actual status getter's output masks.
+the actual status getter's output masks and USB/FireWire source criteria.
 Run with the already prepared build image
 or another environment containing Unicorn:
 
@@ -234,7 +234,7 @@ fault interrupts or the analog battery. The 70 cold-start cases and one
 temperature sequence are private
 `../references/charging-research/charge-policy-emulation.json`.
 
-Its eleven regression tests check negative/out-of-range temperature exclusion,
+Its fourteen regression tests check negative/out-of-range temperature exclusion,
 inclusive voltage thresholds and taper, first-match overlaps, cached-row
 hysteresis, all four charge caps, inhibition flags, both firmware hashes and
 the USB/adapter budget arithmetic described below:
@@ -246,7 +246,7 @@ python3 tools/power/emulate-charge-policy.py \
   build/usb-host-research/firmware/DeviceTree.p105ap.raw
 ```
 
-All ten backend tests and all eleven policy tests passed in the existing
+All twelve backend tests and all fourteen policy tests passed in the existing
 resource-limited build image with Unicorn 2.1.4. The gauge production-C test
 also passed with GCC undefined-behavior sanitizer. Four independently reverted
 fixes each compiled and then failed their intended test assertion, confirming
@@ -276,9 +276,14 @@ Wrapper `0x804c80e4` then applies signed offset 0x128, flooring subtraction at
 zero, and applies the optional 0x120 cap when byte 0x11c is set. This explains
 why the largest adapter-table value is not itself the board's allowed input.
 
-The instance constructor at `0x804c6108` stores vptr `0x804d9588`. Its slot
+The base instance constructor at `0x804c6108` stores vptr `0x804d9588`. Its slot
 +0x350 resolves to `0x804c800c`, whose actual instructions unconditionally
 return 1000 mA. Its slot +0x354 resolves to reset helper `0x804c8158`.
+The actual `AppleARMPMUCharger` constructor `0x804c20c8` calls that base
+constructor and stores vptr `0x804d8ce8`. It inherits the same 1000 mA method;
+the input-budget emulator uses this derived vptr. It overrides +0x354 with
+`0x804c3e24`, which invalidates cached source bookkeeping through `0x804c2a8c`
+before forwarding to the base reset. This is not an observed PMU shutdown write.
 
 The policy emulator executes both budget functions and the actual 1000 mA
 policy callback. Every callback invocation is in its JSON output. The Python
@@ -296,6 +301,71 @@ and exact connection/suspend/detach event meaning still need verification;
 this is not yet proof of a complete detach shutdown path. The helper makes
 clear that carrying an old negotiated budget into a new connection would be
 incorrect. No reset/classification callback was added to Linux.
+
+The derived source-criteria method at +0x35c (`0x804c3e50`) aggregates each
+D1946 backend's +0x54 getter (`0x80ed0b70`). That getter reads status registers
+0x0a..0x0f and produces an OSSet of symbols:
+
+- `USB` when register 0x0a bit 3 is set, and either the caller's qualifier is
+  false or register 0x0a bit 6 is also set.
+- `FireWire` when register 0x0a bit 4 is set. This is the firmware symbol's
+  name, not proof of a physical FireWire interface on p105.
+
+The symbol initializer `0x804c8558` establishes imported slots 0x804db00c
+(`USB`) and 0x804db010 (`FireWire`), followed by `AC`, `External`,
+`ExternalUnsupported`. Their pointers are mocked in the offline experiment;
+the actual membership logic is executed with mocked OSSet allocation/add.
+Tests distinguish all relevant bits and qualifier states, with only one fake
+six-byte status read and no fake register writes.
+
+The main source handler at `0x804c6880` obtains these criteria. An optional
+`usb_det` function may supply USB-present state (stored object at 0xdc);
+`0x804c6594` resolves this using the `function-usb_det` name. No such property
+was found anywhere in the verified p105 ADT, so its alternative PMU criteria
+path is relevant. When USB-present state is false, the handler at `0x804c6a26`
+sets profile 1 and resets the cached budget with reason 1, except for port-state
+0x142 value 4, which uses reason 0. This is concrete budget invalidation,
+while complete hardware detach shutdown still requires tracing the later
+input/charge setter application and accessory state transitions.
+
+### Accessory power-handshake permission and refusal
+
+The p105 `AppleTriStarBuiltIn` instance constructor `0x80885350` stores the
+actual vptr `0x80888998` at `0x8088536e`. Its +0x36c entry
+(`0x80888d04`) points to `0x8088586d`, the bridge to the previously resolved
+`usb_dock_control` AppleARMFunction. The USB research traced the ID IRQ
+through `0x80885160` and report stub `0x8088798c` to the
+IOAccessoryManager consumer `0x807139b8`, which calls the power-handshake
+routine `0x80714028` with the same owner. This proves the bridge for this
+BuiltIn owner; other IOAccessoryManager classes must be checked separately.
+
+Within that handshake routine, the path logged as skipping the handshake and
+allowing charge calls +0x36c with flag `0x80000` at `0x80714260`.
+The path logged as `power handshake verification failed` instead calls it
+with `0x100000` at `0x80714cee`. These are software permission decisions,
+not evidence of an analog PMU fault or successful physical charging.
+
+The actual USBd consumer `0x804c70e4` handles the mask `0x1c0000` at
+`0x804c7224`: port byte +0x130 becomes the complement of flag bit 19,
+and +0x132 becomes flag bit 20. The whole-source budget function
+`0x804c81a0` checks +0x130 at `0x804c8200` and forces that port's
+contribution to zero when it is set (before subsequent source/minimum/maximum
+policy processing). In particular:
+
+| Input flag | +0x130 source inhibit | +0x132 handshake failure | Next call |
+| --- | --- | --- | --- |
+| `0x40000` | 1 | 0 | Source replan `0x804c75b8`. |
+| `0x80000` | 0 | 0 | Debounce `0x804c7414`. |
+| `0x100000` | 1 | 1 | Source replan `0x804c75b8`. |
+
+`USBControl` in the policy emulator executes the actual USBd consumer and
+derived/base reset instructions. Only cache bookkeeping, property publication,
+debounce and whole-source replan are explicitly intercepted and recorded.
+Tests prove these permission/refusal mutations, unchanged-classification
+behavior, and invalidation of an old 2100 mA/adapter budget to a 100 mA USB
+report with cleared source type/index and disabled profile. They do not
+emulate a complete detach, authentication, PMU shutdown or fault lifecycle.
+The CLI marks every intercepted call and never emits register writes.
 
 ## Status, faults and interrupt-consumption evidence
 

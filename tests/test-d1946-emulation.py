@@ -93,6 +93,23 @@ class D1946Firmware(unittest.TestCase):
         self.assertIsNone(sample['reason'])
         self.assertIn('error', sample['transactions'][0])
 
+    def test_usb_criterion_status_and_qualification(self):
+        for status in (0, 8, 64, 72):
+            for qualifier in (False, True):
+                with self.subTest(status=status, qualifier=qualifier):
+                    sample = self.m.Experiment(self.data).criteria((status, 0, 0, 0, 0, 0), qualifier)
+                    expected = ['USB'] if status & 8 and (not qualifier or status & 64) else []
+                    self.assertEqual(sample['criteria'], expected)
+                    self.assertEqual(sample['transactions'],
+                                     [{'direction': 'read', 'register': '0x0a',
+                                       'bytes': bytes((status, 0, 0, 0, 0, 0)).hex()}])
+
+    def test_firewire_symbol_depends_only_on_its_status_mask(self):
+        for status in (0, 1, 2, 4, 6, 8, 16, 255):
+            with self.subTest(status=status):
+                sample = self.m.Experiment(self.data).criteria((status, 255, 255, 255, 255, 255))
+                self.assertEqual('FireWire' in sample['criteria'], bool(status & 16))
+
     def test_fixed_address_tool_rejects_wrong_firmware(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / 'not-the-firmware'

@@ -129,6 +129,92 @@ Ignored local reports: `build/usb-host-research/tristar-xrefs.json`,
 `tristar-fields.txt`, `tristar-disasm.txt`. Heuristic xrefs were checked against
 the listed disassembly; the broader role state machine remains unresolved.
 
+### Tristar event, ID and role evidence chain
+
+The actual **instance** constructor at `0x808869e4` installs vtable
+`0x80889298`. Table `0x80889658` belongs to a metaclass and cannot supply
+instance method slots. The early THS7383 reader differs from later CBTL1610
+code; no later-chip CRC or charging-handshake interpretation is transplanted.
+
+| Transition | Exact 12H321 evidence | Established limit |
+|---|---|---|
+| IRQ → ID read | `0x808870a0` reads register `0x0d`; bit `0x08` invokes `0x80885160` | Other IRQ bits are separate notifications, not adapter types |
+| Register reply → ID bytes | Instance slot `+0x380` → `0x80886be8`: reads seven bytes at `0x39`, then one status byte at `0x0c`; requires status bit 7 and final register byte `0x75`; reverses the other six bytes | No CRC check appears in this reader; this is a register buffer, not a complete IDBUS wire packet or proof of authentication |
+| ID bytes → manager | `0x80885160` invokes import stub `0x8088798c`; pointer `0x80888040` resolves `0x807139b8` in IOAccessoryManager; it invokes six-byte property consumer `0x807133d8` | Property publication does not itself establish USB host role |
+| Manager handshake → charger API | The same BuiltIn owner reaches `0x80714028`; success/debug-allow branch `0x80714260` passes `0x80000`, failure branch `0x80714cee` passes `0x100000` to virtual slot `+0x36c` | API dispatch is established; complete permission, ordering and protection policy still require reconstruction |
+| Accessory ID → AppleCableType | **Unknown** for a camera adapter | No verified camera-adapter ID or complete classification path yet |
+| AppleCableType → controller publication | Verified symbol initialization and criteria consumer, detailed below | `USBHost` describes the attached host: iPad is peripheral; `USBDevice` describes attached device: iPad is host |
+| Publication → SoC data mux | Firmware writes criteria bit 2 to USB-complex control bit 0 | Does not prove Lightning lane routing or safe role transition under Linux |
+| Host role → peripheral power | **Unknown** actual camera-adapter source/conversion/protection architecture | Neither mux selection nor the 3.3 V accessory LDO supplies proven 5 V VBUS |
+
+SystemID is separate: slot `+0x37c` → `0x80886ba8` reads three register bytes
+at `0x20`, requires initial byte `0x74`, and combines
+`((word >> 6) & 0x3fc) | ((word >> 16) & 0xff)` into a 16-bit result.
+It is not the six-byte accessory ID. Slot `+0x388` reads status `0x0c` and
+returns zero if bit 7 is clear, otherwise `1 + bit6`; the precise physical
+meaning of those returned indices remains to be established.
+
+The BuiltIn constructor `0x80885350` installs actual instance vtable
+`0x80888998` using the PIC load/add pair at `0x80885368/0x8088536a` and
+store `0x8088536e`. Its slot `+0x36c` resolves `0x8088586c`, the already
+verified `function-usb_dock_control`/`USBd` AppleARMFunction bridge. This
+establishes the handshake producer for the ID IRQ path with that same owner;
+virtual slots on unrelated classes in IOAccessoryManager are not assumed
+equivalent. The masks above are API arguments, not Tristar/PMU register values.
+
+The companion [charging analysis](p105-charging.md#accessory-power-handshake-permission-and-refusal)
+now tests the actual `USBd` consumer `0x804c70e4` against synthetic policy
+state. Its flag group `0x1c0000` sets per-port source-inhibit field `+0x130`
+and handshake-failure field `+0x132`: `0x80000` clears both, `0x100000` sets
+both, and `0x40000` sets inhibit while clearing failure. Budget consumer
+`0x804c8200` gives an inhibited port a zero contribution before remaining
+current limits. This links the BuiltIn handshake outcome to **incoming-charge
+policy**. It is not permission to source outgoing 5 V VBUS, and does not make
+the complete power handshake, authentication or electrical protection usable
+under Linux.
+
+`0x80886d2c` accepts routing FourCC values including `usb0`, `usb1`,
+`urt0`, `urt1`, `urt2`, `jtag` and `mbus`, translating them to Tristar
+register 1. These identify requested internal data modes, **not** camera
+adapter IDs or AppleCableType strings. The offline planner records the
+transition table and leaves both classification and VBUS gaps explicitly
+unresolved. It has no write backend.
+
+Two ID-to-routing functions are now isolated in IOAccessoryManager:
+`0x80713c84` produces data mode FourCCs from the first ID byte, and
+`0x80713dc4` produces additional accessory-mode FourCCs from its top two bits
+and, for one branch, byte 1. The actual-instruction offline tool
+`scripts/emulate-accessory-routing.py` confirms that the independently
+reported ordinary cable fixture `10 0c 00 00 00 00` selects `usb0` and no
+second data mode. The second decoder maps top bits `01` to `urt1`/`urt1`,
+`10` to `jtag`/`jtag`, and reserved `11` to empty outputs. These are function
+outputs; actual physical pin assignments are not established here.
+One data-decoder path invokes an opaque platform predicate at
+`0x8071d56c`; its 0/1 return is an explicit synthetic fixture, never assumed
+to match the running board. Three additional tests verify the ordinary
+fixture, separate decoder behavior and fail-closed input validation.
+This narrows ID-to-routing analysis without inventing a camera-adapter ID or
+claiming that selecting `usb0` changes the USB role. Ignored output:
+`build/usb-host-research/accessory-routing-emulation-v1.json`.
+
+The additional `scripts/emulate-tristar-id.py` runs the actual THS7383 ID
+reader instructions with fake I2C replies and RAM. Five tests confirm six-byte
+reversal, status gating, marker errors, SystemID bit packing, unchanged output
+on failure, early termination after failed reads, and pinned input validation.
+Simulated status `0x80` and `0xc0` produce the same ID byte order; neither
+proves an adapter role. Output is ignored local
+`build/usb-host-research/tristar-id-emulation-v1.json`.
+
+A [first-person Lightning reverse-engineering report](https://nyansatan.github.io/lightning/)
+by nyansatan (2020) independently describes THS7383 on mini 1, measured
+IDBUS traffic and a normal cable ID `10 0c 00 00 00 00`. It supports
+investigating ID74/75, lane selection and separate power negotiation. The
+author mixes personal measurements with internal-material interpretation and
+explicitly notes uncertainty; it is not a verified THS datasheet. We do not
+retrieve its linked leaked sources. Its later-chip observations and power
+handshake outline cannot be assumed correct for this P105 firmware. No
+camera-adapter ID is established by that report.
+
 ## Accessory power and USB VBUS are separate questions
 
 The P105 dock's `acc_pwr` dispatch argument 5 is now decoded against the
@@ -161,9 +247,10 @@ A requested voltage of 3300 is accepted; 5000 returns `0xe00002c2` before any
 fake bus access. Read/write failures propagate and stop the operation. These
 are simulated digital transactions, not measured voltages or power safety.
 Output is `build/usb-host-research/ldo-emulation-v2.json`. Four firmware tests
-plus the parser/profile/planner suite total **20 passing USB tests** in the
-existing unprivileged, network-disabled build image. Native host Python runs
-16 tests and skips the four requiring its absent Unicorn dependency.
+plus the parser/profile/planner, Tristar and ID-routing suites total **28 passing
+USB/accessory tests** in the existing unprivileged, network-disabled build image.
+Native host Python runs 16 tests and skips the 12 requiring its absent Unicorn
+dependency.
 
 The statement that the iPad must directly generate 5 V for an external USB
 bus is too narrow. Apple's public support documentation establishes that the
@@ -321,6 +408,8 @@ the Apple session-recovery call in `core_intr.c` referred to
 
 ```sh
 python3 -m unittest discover -s tests -p 'test_usb_*.py' -v
+python3 -m unittest discover -s tests -p 'test_tristar_id.py' -v
+python3 -m unittest discover -s tests -p 'test_accessory_routing.py' -v
 python3 scripts/prepare-usb-host.py
 ```
 

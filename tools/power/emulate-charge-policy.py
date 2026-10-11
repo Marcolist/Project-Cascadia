@@ -4,8 +4,9 @@
 Runs the actual 12H321 AppleARMPlatform function 0x804c3ef4 against mocked
 OSData methods and a synthetic charger object. Hashes both local firmware
 inputs. It never opens devices, contacts the iPad, or programs charger hardware.
-This isolated function excludes upstream source-budget and PMU safety handling;
-its return value is a policy ceiling, not permission to apply that current.
+Selected input-budget and USBd state routines are also exercised offline.
+Whole-source classification, debounce, PMU safety and hardware protection are
+not emulated; a table/current result is not permission to apply that current.
 """
 import argparse
 import hashlib
@@ -107,9 +108,9 @@ class InputBudget(Policy):
         self.policy_limit = policy_limit
         self.policy_calls = []
         if policy_limit is None:
-            # Actual AppleARMPMUPowerSource constructor 0x804c6108 stores this
-            # address point. Its slot +0x350 resolves to 0x804c800c: return 1000.
-            self.w32(d1946.SOURCE, 0x804d9588)
+            # Actual AppleARMPMUCharger constructor 0x804c20c8 stores this
+            # address point. Its inherited +0x350 slot resolves to 0x804c800c.
+            self.w32(d1946.SOURCE, 0x804d8ce8)
             self.mu.hook_add(UC_HOOK_CODE, self.policy_callback,
                              begin=0x804c800c, end=0x804c800c)
         else:
@@ -151,6 +152,54 @@ class InputBudget(Policy):
                 'policy_calls': list(self.policy_calls)}
 
 
+class USBControl(InputBudget):
+    """Execute USBd state mutation and real derived/base reset routines.
+
+    Only cache bookkeeping, property publication, debounce and the downstream
+    whole-source replan are intercepted. This is not a complete detach or
+    charger-shutdown simulation: no PMU register operation is performed here.
+    """
+    MOCKED = {0x804c2a8c: 'cache bookkeeping', 0x804c7edc: 'property publication',
+              0x804c7414: 'debounce', 0x804c75b8: 'whole-source replan'}
+
+    def __init__(self, data):
+        super().__init__(data)
+        self.control_calls = []
+        for address in self.MOCKED:
+            self.mu.hook_add(UC_HOOK_CODE, self.side_effect,
+                             begin=address, end=address)
+        self.mu.hook_add(UC_HOOK_CODE, self.reset_entry,
+                         begin=0x804c3e24, end=0x804c3e24)
+
+    def side_effect(self, mu, address, size, user):
+        self.control_calls.append({'mocked': self.MOCKED[address],
+                                   'r1': mu.reg_read(UC_ARM_REG_R1),
+                                   'r2': mu.reg_read(UC_ARM_REG_R2)})
+        mu.reg_write(UC_ARM_REG_R0, 0)
+        mu.reg_write(UC_ARM_REG_PC, mu.reg_read(UC_ARM_REG_LR))
+
+    def reset_entry(self, mu, address, size, user):
+        self.control_calls.append({'actual': 'derived/base reset',
+                                   'port': mu.reg_read(UC_ARM_REG_R1),
+                                   'reason': mu.reg_read(UC_ARM_REG_R2)})
+
+    def control(self, flags, port=0):
+        if port not in (0, 1) or not 0 <= flags <= 0xffffffff:
+            raise ValueError('experiment supports ports 0/1 and a u32 flag mask')
+        self.control_calls = []
+        result = self.call(0x804c70e4, port, flags, 0)
+        read32 = lambda offset: struct.unpack('<I', self.mu.mem_read(d1946.SOURCE + offset, 4))[0]
+        read8 = lambda offset: self.mu.mem_read(d1946.SOURCE + offset, 1)[0]
+        return {'flags': flags, 'port': port, 'return_code': result,
+                'profile_enum106': read8(0x106 + port),
+                'usb_report_mA': read32(0x160 + 4 * port),
+                'usb_type': read32(0x168 + 4 * port),
+                'brick_index': read32(0x178 + 4 * port),
+                'source_inhibit_byte130': read8(0x130 + port),
+                'handshake_failure_byte132': read8(0x132 + port),
+                'calls': list(self.control_calls)}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('kernelcache', type=Path)
@@ -167,11 +216,16 @@ def main():
         budgets = [InputBudget(data).sample_budget(profile, usb_type=usb_type)
                    for profile in range(4, 8) for usb_type in range(6)]
         bricks = [InputBudget(data).sample_budget(7, brick_index=index) for index in range(7)]
-        print(json.dumps({'format': 'p105-charge-policy-emulation-v1', 'hardware_access': False,
+        control = USBControl(data)
+        controls = [control.control(flags) for flags in (0x40000, 0x80000, 0x100000)]
+        print(json.dumps({'format': 'p105-charge-policy-emulation-v2', 'hardware_access': False,
                           'kernelcache_sha256': d1946.EXPECTED_SHA256, 'adt_sha256': d1946.ADT_SHA256,
-                          'limitations': ['isolated table ceiling; source-budget and PMU protection not emulated'],
+                          'limitations': ['selected table/budget/USBd routines only',
+                                          'USBd cache bookkeeping, property publication, debounce and replan mocked',
+                                          'physical source classification and PMU protection not emulated'],
                           'cold_start': cold, 'cached_sequence': warm,
-                          'input_budget': budgets, 'brick_budget': bricks}, indent=2))
+                          'input_budget': budgets, 'brick_budget': bricks,
+                          'usb_handshake_controls': controls}, indent=2))
     except (ValueError, RuntimeError) as error:
         parser.error(str(error))
 

@@ -154,6 +154,91 @@ def accessory_rail_evidence(data):
             "important": "LDO 5 maximum 3300 firmware voltage units is not a 5 V source. Adapter-side conversion or external power requires separate evidence."}
 
 
+def tristar_evidence(data):
+    actual = pic_literal_pointer(data, 0x808869fa, 0x808869fc, 0) + 8
+    if actual != 0x80889298:
+        raise ValueError("audited THS7383 instance vtable mismatch")
+    methods = ((0x370, 0x808870a1, "interrupt_dispatch"),
+               (0x37c, 0x80886ba9, "read_system_id"),
+               (0x380, 0x80886be9, "read_id_response"),
+               (0x388, 0x80886cb1, "status_index"),
+               (0x390, 0x80886d2d, "data_routing_fourcc"))
+    for slot, target, _ in methods:
+        value = struct.unpack_from("<I", data, address_offset(data, actual + slot))[0]
+        if value != target:
+            raise ValueError("audited THS7383 instance dispatch mismatch")
+    # Verified linked import: MOVW ip,#0x6a8; MOVT ip,#0; ADD ip,pc;
+    # LDR ip,[ip]; BX ip at 0x8088798c -> pointer 0x80888040.
+    import_pointer = struct.unpack_from("<I", data, address_offset(data, 0x80888040))[0]
+    if import_pointer != 0x807139b9:
+        raise ValueError("audited Tristar ID report import mismatch")
+    builtin_vtable = pic_literal_pointer(data, 0x80885368, 0x8088536a, 0) + 8
+    bridge = struct.unpack_from("<I", data, address_offset(data, builtin_vtable + 0x36c))[0]
+    if builtin_vtable != 0x80888998 or bridge != 0x8088586d:
+        raise ValueError("audited BuiltIn USBd bridge mismatch")
+    roles = cable_role_evidence(data)["cable_types"]
+    transitions = [{"from": "THS7383 IRQ register 0x0d bit 0x08",
+                    "to": "read IDResponse via 0x80885160",
+                    "status": "firmware dispatch verified"},
+                   {"from": "valid seven-byte register reply with status bit7 and marker 0x75",
+                    "to": "six reversed bytes reported to IOAccessoryManager 0x807139b8",
+                    "status": "firmware dispatch and synthetic execution verified"},
+                   {"from": "six accessory ID bytes / IOAccessoryManager properties",
+                    "to": "AppleCableType symbol selection",
+                    "status": "UNRESOLVED: no camera-adapter ID mapping established"}]
+    transitions += [{"from": role["apple_cable_type"],
+                     "to": {"criteria": role["publication_criteria"],
+                            "usb_complex_control_bit0": role["usb_complex_control_bit0"],
+                            "ipad_role": role["ipad_role"]},
+                     "status": "firmware consumer verified; live operation unverified"}
+                    for role in roles]
+    transitions += [{"from": "external host controller publication and data routing",
+                     "to": "peripheral VBUS source, source budget and protection",
+                     "status": "UNRESOLVED: neither role publication nor LDO5 proves 5 V VBUS"}]
+    return {"actual_personality_from_adt": "AppleTHS7383 (ths7383/cbtl1608)",
+            "instance_vtable": hex(actual), "metaclass_vtable_not_interchangeable": "0x80889658",
+            "methods": [{"slot": hex(s), "target_thumb": hex(t), "description": n}
+                        for s, t, n in methods],
+            "id_response": {"register": "0x39", "register_read_bytes": 7,
+                            "status_register": "0x0c", "required_status_mask": "0x80",
+                            "last_register_byte_marker": "0x75", "output": "first six register bytes reversed",
+                            "crc_check_visible_in_this_reader": False,
+                            "wire_packet_layout_or_authentication_proven": False,
+                            "not_ready_return": "0xe00002d9", "bad_marker_return": "0xe00002c6"},
+            "irq_dispatch": [{"mask": "0x04", "target": "0x80885110", "meaning": "connection status notification, exact ID/API semantics unresolved"},
+                             {"mask": "0x02", "target": "0x80885154", "meaning": "set dock flag+0xf8 and notify manager"},
+                             {"mask": "0x08", "target": "0x80885160", "meaning": "read/report accessory IDResponse"},
+                             {"mask": "0x01", "target": "0x808851fc", "meaning": "provider callback+0x3dc; exact power meaning unresolved"}],
+            "id_report": {"tristar_import_stub": "0x8088798c", "pointer": "0x80888040",
+                          "ioaccessory_manager_target": hex(import_pointer & ~1),
+                          "six_byte_property_consumer": "0x807133d8"},
+            "usb_dock_bridge": {"builtin_constructor": "0x80885350",
+                                "instance_vtable": hex(builtin_vtable), "slot": "0x36c",
+                                "target_thumb": hex(bridge), "adt_function": "function-usb_dock_control -> charger USBd",
+                                "handshake_owner_chain": "ID IRQ -> 0x807139b8 -> 0x80714028 with same BuiltIn owner",
+                                "success_or_debug_allow_call": "0x80714260, argument 0x80000",
+                                "verification_failure_call": "0x80714cee, argument 0x100000",
+                                "charger_api_consumer": "0x804c70e4, flag group 0x1c0000 at 0x804c7224",
+                                "input_charge_permission_states": [{"flag": "0x40000", "source_inhibit": 1, "handshake_failure": 0},
+                                                                   {"flag": "0x80000", "source_inhibit": 0, "handshake_failure": 0},
+                                                                   {"flag": "0x100000", "source_inhibit": 1, "handshake_failure": 1}],
+                                "inhibit_budget_consumer": "0x804c8200: inhibited port contributes zero before remaining limits",
+                                "permission_for_outgoing_vbus": False,
+                                "arguments_are_literal_hardware_register_writes": False,
+                                "complete_power_permission_policy_verified": False},
+            "data_routing_modes": ["usb0", "usb1", "urt0", "urt1", "urt2", "jtag", "mbus"],
+            "accessory_id_to_routing": {"data_mode_decoder": "0x80713c84",
+                                        "accessory_mode_decoder": "0x80713dc4",
+                                        "normal_cable_fixture_id": "100c00000000",
+                                        "normal_cable_data_modes": ["usb0", None],
+                                        "platform_predicate_stub": "0x8071d56c (synthetic 0/1 in offline experiment)",
+                                        "camera_adapter_fixture_known": False,
+                                        "fourcc_is_not_apple_cable_type": True},
+            "data_routing_modes_are_adapter_ids": False,
+            "camera_adapter_id_known": False, "hardware_access": False,
+            "state_transitions": transitions}
+
+
 def phy_values(adt):
     node, end = dtparse.parse_node(adt, 0)
     if end != len(adt):
@@ -229,6 +314,7 @@ def plan(kernelcache, adt):
                        "IODelay_symbol": hex(delay)},
             "controller_role_evidence": cable_role_evidence(kernelcache),
             "accessory_rail_evidence": accessory_rail_evidence(kernelcache),
+            "tristar_identification_evidence": tristar_evidence(kernelcache),
             "hsic_state": {"adt_hsic_enabled_property_present": hsic_property,
                            "firmware_bootarg_hsic_default": 1,
                            "object_field": "+0x50", "base_start": "0x8086180c",
