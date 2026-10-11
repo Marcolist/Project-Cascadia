@@ -28,6 +28,8 @@ Charging evidence:
 - [Source-event notifications](p105-source-events.md)
 - [Input-current backoff, stored cap and deadline](p105-source-backoff.md)
 - [Charging status and blocked recovery paths](p105-charge-status.md)
+- [Concrete charger guard-field owners](p105-charge-guard-ownership.md)
+- [System watchdog and charger protection distinction](p105-pmu-watchdog.md)
 - [ADC identities and scaling with acquisition blocked](p105-d1946-adc.md)
 - [ADC completion, IRQ and quiesce with fake I/O](p105-d1946-adc-lifecycle.md)
 - [ARM clock interval conversion with fake frequency and time](p105-clock-intervals.md)

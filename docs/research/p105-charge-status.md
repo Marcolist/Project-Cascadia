@@ -72,9 +72,9 @@ bypass fault or current-budget checks in a future Linux driver.
 
 For the remaining `TO` path, and for `END`, later conditions require:
 
-- Charger byte **+0x1cd** zero; its complete ownership/meaning remains open.
+- Charger byte **+0x1cd** zero; its producer is the `pmu-measured` property-presence policy, as traced in [guard-field ownership](p105-charge-guard-ownership.md). Its complete periodic lifecycle remains open.
 - Current capacity strictly below **95%** of maximum.
-- Nonzero attachment timestamp **+0x1c8**.
+- Nonzero timestamp **+0x1c8**, populated when `adapterInfo()` is nonzero. Its inferred attachment role does not make it a direct VBUS measurement.
 - Current clock strictly below `attached_at + 54000` (0xd2f0).
 
 `TO` then uses the same strict 300-unit check and slot +0x74. `END` invokes
@@ -138,7 +138,8 @@ stack. Missing temperature/fault status must remain an error in Linux, not
 be reclassified as healthy. Stack clearing makes these trials reproducible;
 it does not establish the original firmware's behavior under all failures.
 
-Remaining work: emulate the broader publication policy and trace the owners
-of +0x1cd and +0x1c8; establish actual thermal/voltage/termination protection; determine
-counter lifecycle; and design bounded fault-aware Linux state transitions.
+The separate [guard-owner trace](p105-charge-guard-ownership.md) resolves
+the property and adapter-information producers of +0x1cd and +0x1c8.
+Remaining work: emulate the broader publication and periodic policy; establish
+actual thermal/voltage/termination protection; determine counter lifecycle; and design bounded fault-aware Linux state transitions.
 No device read or charging-control experiment is authorized by this document.
