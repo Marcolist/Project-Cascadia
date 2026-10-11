@@ -320,7 +320,7 @@ static int ppn_data_out(int bus, uint8_t *buf, uint32_t len)
         W(fmi[bus], FMI_CONTROL, 3);
         if (pio_read(bus, w, nw))
             return -1;
-        memcpy(buf + off, w, n);
+        memcpy(buf + off, w, n < nw ? n : nw);
         off += nw;
     }
     return 0;
