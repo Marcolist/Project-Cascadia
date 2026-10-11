@@ -26,7 +26,7 @@ from their numerical values:
   and clears register 0x5b bit 6 in the inspected zero-event fixture.
 - **Quiesce:** reads/discards nine event bytes; sets 0x3f bit 7; writes
   `88 ff ff ff ff ff ae ff ff` to 0x12..0x1a; modifies 0xaf and, for one
-  object-variant branch, sets 0x1b bit 1. Additional GPIO/provider actions
+  sleep-type branch, sets 0x1b bit 1. Additional GPIO/provider actions
   form part of the same operation.
 - **Sleep:** enters different event-source/mutex/provider/GPIO handling;
   the synthetic fixture does not perform the Wake/Quiesce 0x3f mutations.
@@ -42,8 +42,10 @@ current setter for zero-current requests. These bits must not be conflated.
 read and register-mutation instructions. Only PMU I/O and surrounding
 provider/mutex/GPIO/quiesce/logging/event-source helpers are mocked. All
 mock calls and synthetic PMU transactions are recorded. The default fixture
-has no pending events and object field +0xe4 value 7; this field is synthetic
-and is not a measured PMU revision. Tests also exercise field value 0.
+has no pending events and object field +0xe4 value 7; this field is a synthetic
+cached system sleep type, not a measured PMU revision. Tests also exercise
+field value 0. The harness's existing `variant_field` argument is a fixture
+parameter; it must not be interpreted as a hardware variant.
 The harness pins the kernelcache hash and never opens a bus or device node.
 
 ```sh
@@ -57,6 +59,26 @@ Unicorn 2.1.4. They cover preservation of unrelated bits across six starting
 additional transactions, refusal of a different image and injected read error.
 These tests do not validate physical PMU state, actual interrupts, resume
 timing or electrical charge protection.
+
+## Object +0xe4 is the cached system sleep type
+
+Initializer `0x80ed01c4` interns the exact property name
+`IOPMSystemSleepType` (string `0x80ed218c`) and stores its symbol at global
+`0x80ed467c`. Method `0x80ecd7b0` either clears object +0xe4 to zero on its
+active branch, or queries the root-domain property through helper
+`0x80ed203c`, casts it to `OSNumber`, calls its unsigned 32-bit value method
+at virtual slot +0x50 and stores the result at `0x80ecd83c`. If that lookup
+fails, it stores 2. This proves the field's software provenance independently
+of the synthetic lifecycle experiment.
+
+The contemporary public Apple XNU header names sleep type 2 normal sleep
+and 7 deep idle. This is a reference for the enum, not a claim that the public
+source matches every instruction of this firmware: the tested kernel identifies
+itself as `xnu-2784.40.6~18`; the available header is XNU 2782.40.9,
+revision `c2b85efb3cd2a727d605af388855308d90d0bd70`:
+[IOPMPrivate.h](https://github.com/apple-oss-distributions/xnu/blob/c2b85efb3cd2a727d605af388855308d90d0bd70/iokit/IOKit/pwr_mgt/IOPMPrivate.h).
+The conditional +0xe4 branches therefore distinguish system sleep policies;
+they cannot establish a PMU silicon revision or charger-temperature bucket.
 
 The injected Wake failure is particularly important: when reading 0x3f fails,
 Apple's code does not abort the subsequent write. In the synthetic fixture it
@@ -117,8 +139,9 @@ complete restart/termination requirements remain open.
 
 1. Trace 0x80ed06a4 through its two generic charger callbacks, including the
    exact source-attach/event-versus-status relationship and error behavior.
-2. Resolve who sets object +0xe4, the IRQ masks and the boot current ceiling;
-   distinguish actual p105 values from synthetic test fixtures.
+2. Resolve the IRQ-mask owners and boot current ceiling; distinguish actual
+   p105 values from synthetic test fixtures. The +0xe4 owner is now traced
+   to `IOPMSystemSleepType` above.
 3. Search the initialization/boot chain for writes to the PMU temperature
    threshold and charging-voltage registers, using exact consumers rather
    than inferring from register names on unrelated PMUs.
