@@ -110,3 +110,16 @@ error paths and arbitration still require tracing before an external route
 can be implemented safely alongside WLAN. The independently built DWC2 host
 profile has a different controller boundary and does not establish that
 Apple's EHCI routing, tuning or power callbacks apply to DWC2.
+
+## Configured exposure of the current bundles
+
+Inspection on 2026-10-12 of both merged configurations (`build/linux/.config`
+and `build/usb-host-research/kernel-output/.config`) finds `CONFIG_PM=y` but
+`# CONFIG_SUSPEND is not set`; PM_SLEEP is absent. The diagnostics execute the
+generic-core/USB consumer functions separately with fake dependencies. They
+do not imply that system sleep is enabled or was exercised in these bundles.
+The actual HCD bus suspend skips the roothub suspend call for automatic PM
+messages. HCD removal still invokes the void power-off helper and discards
+its error; retained references and later re-probe remain relevant. Thus this
+is a concrete error-lifetime defect, not proof of a normal-boot failure or
+a physical suspend incident on our device.

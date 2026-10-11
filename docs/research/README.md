@@ -51,6 +51,7 @@ Storage and USB evidence:
 - [PHY error-path assumptions](p105-usb-phy-errors.md)
 - [Reproduced partial-off/Core-count gap and shared lifecycle](p105-usb-shared-lifecycle.md)
 - [Temporary compensation policy and actual USB consumer limits](p105-usb-poweroff-policy.md)
+- [Actual Apple shared-PHY client arbitration and controller ownership](p105-usb-phy-ownership.md)
 - [EHCI/OHCI controller and port power](p105-usb-ehci.md)
 - [THS7383 accessory routing and orientation](p105-tristar-routing.md)
 - [Accessory rail callbacks and ID-derived voltage](p105-accessory-power.md)
