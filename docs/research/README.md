@@ -46,6 +46,7 @@ Storage and USB evidence:
 - [PPN error-list fields and unresolved AP/IOP ownership](p105-ppn-error-list-evidence.md)
 - [PPN translation/cache/completion and panic boundaries](p105-ppn-completion-boundaries.md)
 - [Strict synthetic error-list decoder and independent oracle](p105-ppn-synthetic-decoder.md)
+- [Normalized multi-list observations and unknown absence](p105-ppn-normalized-observations.md)
 - [Existing NAND architecture](p105-nand.md)
 - [USB host/PHY evidence](p105-usb-host.md)
 - [DWC2 versus Apple EHCI/OHCI controller boundaries](p105-usb-controller-boundaries.md)
