@@ -50,9 +50,13 @@ Ten tests execute these boundaries:
 
 The sample and limit are **firmware numeric units**. Field +0x22c has a
 `Voltage` OSNumber producer at **0x804c2f10..2f2e** (key at **0x804cedde**) and
-another producer at **0x804c5302** in the pmu-measured path. Complete calibration
-and unit conversion have not been verified. Fixtures 4000/4200 are chosen
-integers, not measured millivolts or recommended battery targets. Numeric
+another producer at **0x804c5302** in the pmu-measured path. The follow-up
+[ADC-to-owner unit chain](p105-voltage-unit-chain.md) now proves the bounded
+software conversion to the mV convention, including signed policy compensation.
+The HDQ/HID dictionary producer, physical calibration and safe CV/termination
+configuration remain unverified. The limit backend is not a proven analog CV
+actuator. Fixtures 4000/4200 are chosen integers, not measured battery values
+or recommended targets. Numeric
 boundary tests deliberately include 1 and UINT_MAX; those test arithmetic,
 not permissible physical voltages.
 
