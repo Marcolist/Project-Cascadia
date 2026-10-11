@@ -334,11 +334,13 @@ static int ppn_cmd_e7(int bus)
     return wait_done(fmc[bus], FMC_STATUS, 1, 1);
 }
 
-static void ppn_end(int bus)
+/* A failed end command is a read transport failure, even after data out. */
+static int ppn_end(int bus)
 {
     W(fmi[bus], FMI_CONTROL, 6);
-    ppn_cmd1(bus, 0x77);
+    int ret = ppn_cmd1(bus, 0x77);
     W(fmc[bus], FMC_CE_CTRL, 0);
+    return ret;
 }
 
 int ppn_get_feature(int bus, int ce, uint16_t feat, uint8_t *buf, uint32_t len, uint8_t *st)
@@ -348,8 +350,8 @@ int ppn_get_feature(int bus, int ce, uint16_t feat, uint8_t *buf, uint32_t len, 
     clear_irqs(bus);
     if (ppn_cmd_addr_cmd(bus, 0xee, 0xe7, feat, 2) == 0 && ppn_status(bus, st) == 0)
         r = ppn_data_out(bus, buf, len);
-    ppn_end(bus);
-    return r;
+    int end_ret = ppn_end(bus);
+    return r ? r : end_ret;
 }
 
 /* h2fmi_ppn_set_features, for the power-state feature only: EF FEAT (RW_CTRL
@@ -397,8 +399,8 @@ int ppn_params(int bus, int ce, uint8_t *buf, uint8_t *st)
     clear_irqs(bus);
     if (ppn_cmd_addr_cmd(bus, 0x92, 0x97, 0, 1) == 0 && ppn_status(bus, st) == 0 && *st == 0x40)
         r = ppn_data_out(bus, buf, 0x200);
-    ppn_end(bus);
-    return r;
+    int end_ret = ppn_end(bus);
+    return r ? r : end_ret;
 }
 
 /* One page read, the way iBEC's sequencer queues it (fmiss_ppn_read_multi:
@@ -418,8 +420,9 @@ int ppn_read_page(int bus, int ce, uint32_t row, uint8_t *buf, uint32_t len, uin
     clear_irqs(bus);
     if (ppn_cmd_addr_cmd(bus, 0x0a, 0x37, row, 3) == 0 && ppn_status(bus, st) == 0)
         r = ppn_data_out(bus, buf, len);
-    ppn_cmd1(bus, 0x77);
+    /* Preserve a preceding failure, but never accept a failed completion. */
+    int end_ret = ppn_cmd1(bus, 0x77);
     W(fmc[bus], FMC_CE_CTRL, 0);
     device_reset(bus, on, if_ctrl);
-    return r;
+    return r ? r : end_ret;
 }
