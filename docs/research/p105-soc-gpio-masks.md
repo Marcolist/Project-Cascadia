@@ -2,16 +2,18 @@
 
 ## Result and scope
 
-The current A5 Linux GPIO driver clears selector bit `0x20`, but leaves selector
-bit `0x40` behind when configuring a GPIO output. Its peripheral branch sets
+Before the narrow fix, the A5 Linux GPIO driver cleared selector bit `0x20`, but
+left selector bit `0x40` behind when configuring a GPIO output. Its peripheral branch set
 `0x20` without first clearing `0x40`. The verified P105 firmware treats these
 bits as a two-bit function selector. This is a reproducible source-level mask
 problem, independent of the still unproven electrical purpose of accessory GPIO
 132.
 
-This research group changes **no runtime driver**. The comparison compiles the
-actual Linux callbacks, then compiles a temporary candidate with only their
-selector clear masks changed. Both execute against ordinary C arrays. The
+The runtime source now uses a separate `0x60` selector clear mask in four refresh
+branches. No GPIO consumer is enabled or invoked by this change. The comparison
+compiles those actual corrected Linux callbacks without mutation, then compiles
+a temporary legacy-mask control with only those four clear masks reverted. Both
+execute against ordinary C arrays. The
 firmware oracle executes original instructions in Unicorn using synthetic RAM.
 There is no hardware MMIO backend, device access, GPIO operation, or claim that
 this alone enables accessory power, VBUS, USB host mode or charging.
@@ -44,10 +46,12 @@ bounded and must return. The audited output setter at `0x80ded938` uses modes
 
 Linux source is
 `patches/files-sandcastle-port/drivers/pinctrl/pinctrl-s5l8940x-gpio.c`.
-The audited baseline SHA256 is
+The audited pre-fix baseline SHA256 was
 `e71fc77818ad2a6358b55ee8233da79c30b2f88985decd9e34bcadb01456c53f`.
+The corrected source SHA256 is
+`d0486b6e605be4770fcc6a6d24d48e147e7e1fa4409a9cdc2272bd00e453664d`.
 Every result includes the hash of the source actually compiled. The temporary
-candidate rejects unexpected callback shape. The harness extracts the existing
+legacy-mask control rejects unexpected callback shape. The harness extracts the existing
 macros and eight callback bodies; it does not reimplement the Linux decisions in
 Python. Only readl/writel, small containing structures and data-access helpers
 are replaced with fake equivalents. Existing `cc` compiles with warnings as
@@ -75,11 +79,11 @@ preserves or normalizes the old IRQ field: old values `0x02` and `0x0e` become
 zero, while other old IRQ values survive. DATA is preserved. This does not match
 Linux's separate policy of selecting IRQ-off `0x0e` for a plain input.
 
-## Linux baseline and comparison-only candidate
+## Historical baseline and the corrected runtime source
 
-The current definition `REG_GPIOx_PERIPH = 1 << 5` has two distinct jobs:
+Before the fix, `REG_GPIOx_PERIPH = 1 << 5` had two distinct jobs:
 recognizing/setting the one supported peripheral function, and serving as the
-clear mask. The second job is too narrow. The candidate introduces a separate
+clear mask. The second job was too narrow. The fix introduces a separate
 `REG_GPIOx_MUX_MASK = 3u << 5` for clear masks only:
 
 - Output, enabled-IRQ and plain-input refresh clear `0x60` instead of `0x20`.
@@ -89,9 +93,10 @@ clear mask. The second job is too narrow. The candidate introduces a separate
   as in the existing driver.
 
 Representative final fake-register values, starting with `CFG_DONE` already
-set:
+set. The first result column reproduces the old masks in a temporary control;
+the second executes the actual corrected source:
 
-| Operation | Initial | Current Linux | Temporary mask candidate | Actual firmware |
+| Operation | Initial | Legacy-mask control | Corrected Linux source | Actual firmware |
 | --- | --- | --- | --- | --- |
 | Output low | `0x2d0` | `0x2d2` | `0x292` | `0x292`, mode 14 |
 | Output high | `0x2d0` | `0x2d3` | `0x293` | `0x293`, mode 15 |
@@ -104,7 +109,7 @@ set:
 The last two input rows deliberately record remaining differences. They are not
 passed off as firmware equivalence. All four refresh branches are separately
 covered by actual-C fixtures. Upper 32-bit fields are preserved: input
-`0xa50002d0` becomes output high `0xa5000293` in the candidate. The firmware
+`0xa50002d0` becomes output high `0xa5000293` in the corrected source. The firmware
 shadow itself is only 16-bit, so upper-field preservation is a Linux test,
 not a firmware comparison.
 
@@ -136,15 +141,16 @@ are absent. This A5 driver supplies neither `gpio_request_enable` nor
 issue.
 [Primary core source at the same Linux revision](https://raw.githubusercontent.com/torvalds/linux/adc218676eef25575469234709c2d87185ca223a/drivers/pinctrl/pinmux.c).
 
-## Narrow runtime proposal and excluded changes
+## Applied narrow fix and excluded changes
 
-A separate selector mask `0x60` in the four refresh clear masks is technically
+A separate selector mask `0x60` now appears in the four refresh clear masks,
 supported by the actual P105 function, with the output branch the strongest
-exact oracle match. Keep `REG_GPIOx_PERIPH = 0x20` as the existing selected
+exact oracle match. `REG_GPIOx_PERIPH = 0x20` remains the existing selected
 function and software-state decoder. Replacing that constant globally with
 `0x60` would instead select a different function and is incorrect.
 
-Before any runtime application, review these distinct questions independently:
+These distinct questions remain for separate review and authorized hardware
+validation:
 
 1. `direction_input()` clears OUTEN but retains cached PERIPH. It can leave an
    explicitly requested GPIO input in peripheral mode. A mux-mask change alone
@@ -152,10 +158,10 @@ Before any runtime application, review these distinct questions independently:
 2. Initialization recognizes `0x20`, but not a `0x40`-only alternate function.
    Representing unknown inherited functions requires a separate state policy.
 3. Firmware mode 2 preserves IRQ/DATA; Linux clears IRQ and applies cached DATA.
-   Example `0xfffe` yields firmware `0xffbe`, candidate `0xffb0`; `0x291` yields
-   firmware `0x2b1`, candidate `0x2b0`. These existing policies are not changed.
+   Example `0xfffe` yields firmware `0xffbe`, Linux `0xffb0`; `0x291` yields
+   firmware `0x2b1`, Linux `0x2b0`. These existing policies are not changed.
 4. Linux's config helper can write twice if `CFG_DONE` was absent. Starting at
-   `0xd0`, candidate output-high writes `0x93` then `0x293`; firmware mode 15
+   `0xd0`, Linux output-high writes `0x93` then `0x293`; firmware mode 15
    writes only `0x93`. The mask evidence does not authorize changing this timing.
 5. Actual pad mux availability, consumer transitions, GPIO 132 board wiring,
    power-switch polarity, accessory voltage and host VBUS remain hardware
@@ -170,11 +176,13 @@ python3 tests/test_soc_gpio_masks.py
 python3 scripts/compare-soc-gpio.py build/firmware/kernelcache.12H321.macho
 ```
 
-Nine unittest methods cover baseline-versus-candidate outputs, all refresh
+Nine unittest methods cover actual-source versus legacy-control outputs, all refresh
 branches, alternate functions, input differences, 32-bit preservation,
 config-write ordering and rejected inputs/source drift. Firmware-dependent
 tests explicitly skip when local firmware, Unicorn or `cc` are absent; a skip
 is not a firmware validation. The recorded local verification used all
 dependencies and ran without skips. No package installation is required by
-these scripts. The generated comparison exists only in a temporary directory;
-the public source reports `runtime_source_changed: false`.
+these scripts. The generated control exists only in a temporary directory;
+the public tool reports `runtime_source_modified_by_tool: false`. Source changes
+were made separately as the reviewed four-mask fix, not by running the tool.
+Passing this offline suite does not establish pad voltages or real device behavior.

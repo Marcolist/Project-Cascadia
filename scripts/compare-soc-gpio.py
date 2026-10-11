@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Compare actual Linux GPIO callbacks and 12H321 firmware using fake RAM.
 
-The candidate is a temporary source transform compiled only in a test directory.
-The real driver is never written. No device/MMIO backend exists. Register value
+The current runtime callbacks are compiled as-is. A legacy-mask control is a
+temporary source transform compiled only in a test directory. The tool never
+writes the real driver. No device/MMIO backend exists. Register value
 comparisons do not establish electrical behavior or authorize any GPIO change.
 """
 import argparse
@@ -103,22 +104,24 @@ CALLBACKS = ('apple_s5l8940x_gpio_set_reg', 'apple_s5l8940x_gpio_refresh_reg',
              'apple_s5l8940x_gpio_gpio_direction_input', 'apple_s5l8940x_gpio_gpio_direction_output')
 
 
-def linux_harness(text, candidate):
+def linux_harness(text, legacy_control):
     macros = '\n'.join(line for line in text.splitlines() if re.match(r'#define\s+(PINCFG_STAT_|REG_GPIO)', line))
     callbacks = '\n'.join(function(text, name) for name in CALLBACKS)
-    if candidate:
-        # A comparison-only experiment: clear both selector bits in each branch,
-        # retain the existing single supported peripheral function (bit 0x20).
-        # Direction-input software-state handling and CFG_DONE policy stay intact.
-        old = 'REG_GPIOx_IRQ_MASK | REG_GPIOx_DATA | REG_GPIOx_PERIPH,'
-        if callbacks.count(old) != 3:
-            raise ValueError('Linux GPIO clear-mask shape changed; candidate refused')
-        callbacks = callbacks.replace(old, 'REG_GPIOx_IRQ_MASK | REG_GPIOx_DATA | REG_GPIOx_MUX_MASK,')
-        old = 'REG_GPIOx_IRQ_MASK | REG_GPIOx_DATA, REG_GPIOx_PERIPH'
-        if callbacks.count(old) != 1:
-            raise ValueError('Linux peripheral clear-mask shape changed; candidate refused')
-        callbacks = callbacks.replace(old, 'REG_GPIOx_IRQ_MASK | REG_GPIOx_DATA | REG_GPIOx_MUX_MASK, REG_GPIOx_PERIPH')
-        macros += '\n#define REG_GPIOx_MUX_MASK (3u << 5)\n'
+    # Validate the narrow runtime fix before compiling either version. The
+    # control changes only its four clear masks back to their historical form;
+    # it is explicitly a mutation control, not the current runtime source.
+    old = 'REG_GPIOx_IRQ_MASK | REG_GPIOx_DATA | REG_GPIOx_MUX_MASK,'
+    if callbacks.count(old) != 4 or not re.search(
+            r'#define\s+REG_GPIOx_MUX_MASK\s+\(3u << 5\)', macros):
+        raise ValueError('Linux GPIO clear-mask shape changed; legacy control refused')
+    if legacy_control:
+        peripheral = old + ' REG_GPIOx_PERIPH'
+        if callbacks.count(peripheral) != 1:
+            raise ValueError('Linux peripheral clear-mask shape changed; legacy control refused')
+        callbacks = callbacks.replace(peripheral,
+                'REG_GPIOx_IRQ_MASK | REG_GPIOx_DATA, REG_GPIOx_PERIPH')
+        callbacks = callbacks.replace(old,
+                'REG_GPIOx_IRQ_MASK | REG_GPIOx_DATA | REG_GPIOx_PERIPH,')
     prefix = r'''
 #include <assert.h>
 #include <stdint.h>
@@ -181,13 +184,13 @@ class LinuxCallbacks:
         self.directory = tempfile.TemporaryDirectory(prefix='cascadia-soc-gpio-')
         self.binaries = {}
         try:
-            for candidate in (False, True):
-                source = Path(self.directory.name) / ('candidate.c' if candidate else 'baseline.c')
+            for legacy_control in (False, True):
+                source = Path(self.directory.name) / ('legacy-mask-control.c' if legacy_control else 'actual-runtime.c')
                 binary = source.with_suffix('')
-                source.write_text(linux_harness(self.text, candidate))
+                source.write_text(linux_harness(self.text, legacy_control))
                 subprocess.run(['cc', '-std=gnu11', '-O1', '-g', '-Wall', '-Wextra', '-Werror',
                                 '-fsanitize=undefined', str(source), '-o', str(binary)], check=True)
-                self.binaries[candidate] = binary
+                self.binaries[legacy_control] = binary
         except BaseException:
             self.close()
             raise
@@ -195,17 +198,17 @@ class LinuxCallbacks:
     def close(self):
         self.directory.cleanup()
 
-    def run(self, operation, initial, candidate=False):
+    def run(self, operation, initial, legacy_control=False):
         if isinstance(operation, bool) or not isinstance(operation, int) or not 0 <= operation <= 6:
             raise ValueError('unsupported Linux callback operation')
         if isinstance(initial, bool) or not isinstance(initial, int) or not 0 <= initial <= 0xFFFFFFFF:
             raise ValueError('synthetic Linux register must be a 32-bit integer')
-        if type(candidate) is not bool:
-            raise ValueError('candidate flag must be boolean')
-        completed = subprocess.run([str(self.binaries[candidate]), str(operation), hex(initial)],
+        if type(legacy_control) is not bool:
+            raise ValueError('legacy control flag must be boolean')
+        completed = subprocess.run([str(self.binaries[legacy_control]), str(operation), hex(initial)],
                                    check=True, capture_output=True, text=True)
         result = json.loads(completed.stdout)
-        result.update({'operation': operation, 'initial': initial, 'candidate': candidate,
+        result.update({'operation': operation, 'initial': initial, 'legacy_mask_control': legacy_control,
                        'linux_source_sha256': self.source_sha256, 'hardware_access': False})
         return result
 
@@ -222,18 +225,18 @@ def main():
         for operation, mode, initial in ((0, 14, 0x2D0), (1, 15, 0x2D0),
                                          (2, 14, 0x2D2), (3, 15, 0x2D2),
                                          (4, 0, 0x2D0), (5, 2, 0x2D0), (4, 0, 0x2B0)):
-            rows.append({'linux_baseline': callbacks.run(operation, initial),
-                         'linux_temporary_candidate': callbacks.run(operation, initial, True),
+            rows.append({'linux_runtime_source': callbacks.run(operation, initial),
+                         'linux_legacy_mask_control': callbacks.run(operation, initial, True),
                          'firmware_oracle': firmware_mode(data, mode, initial)})
     except (OSError, ValueError, RuntimeError, UcError, subprocess.SubprocessError) as error:
         parser.exit(1, f'error: {error}\n')
     finally:
         if callbacks:
             callbacks.close()
-    print(json.dumps({'hardware_access': False, 'runtime_source_changed': False,
+    print(json.dumps({'hardware_access': False, 'runtime_source_modified_by_tool': False,
                       'comparisons': rows,
                       'limitations': ['firmware IRQ/locks mocked; Linux fake MMIO',
-                                      'candidate exists only in temporary compiled source',
+                                      'legacy-mask control exists only in temporary compiled source',
                                       'input IRQ policy, CFG_DONE and physical behavior are separate questions']}, indent=2))
 
 
