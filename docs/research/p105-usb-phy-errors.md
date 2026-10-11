@@ -1,4 +1,4 @@
-# P105 host PHY: power error handling
+# P105 PHY: power and initialization error handling
 
 Research date: 2026-10-11. This is a local source correction with mocked
 callback tests. No USB device, iPad supply or PMGR register was accessed.
@@ -42,8 +42,30 @@ updates, coupled-rail balancing or a parent-supply disable. Reference/retry
 handling needs another review if the board's supply topology changes.
 
 The Linux PHY core retains `power_count` after a failed power-off callback;
-partial cleanup can therefore be retried. The test models early provider
+an explicit subsequent power-off can therefore retry cleanup. This does not
+establish that a new power-on after partial cleanup restores both supplies:
+the core skips the power-on callback while its count is nonzero. That shared
+consumer lifecycle needs a separate review. The test models early provider
 failures only, not the regulator core's complete dependency graph.
+
+## OTG initialization and optional resource mapping
+
+`s5l_usbphy_init()` previously ignored `s5l_pmgr_on(PMGR_USB_OTG)`'s return
+value. If the PMGR status did not acknowledge the gate request, the helper
+returned `-ETIMEDOUT`, but initialization continued into delays and two writes
+to the PHY reset register and returned success. Initialization now propagates
+the gate error before those reset writes and post-gate delays. Pre-initialization
+register reads and the original gate request/poll still occur; this is not an
+MMIO-free error path or a gate rollback. The successful reset sequence is
+unchanged, and a later acknowledged gate request can retry initialization.
+
+The second MMIO resource remains optional when it is absent. When the resource
+is present, however, `devm_platform_ioremap_resource()` can report a real
+mapping/request error. Probe previously changed that error pointer to `NULL`
+and published both PHY instances. It now returns the original error before
+creating or publishing either PHY. A present resource that maps successfully
+retains the previous behavior. No optional-resource requirement or host-role
+policy was added.
 
 ## Verification
 
@@ -54,3 +76,19 @@ repeat activation, optional absence, deferred/failed acquisition, enable
 failures, both gate failures, preservation of existing references, failed
 rollback, power-off failure and subsequent cleanup. No electrical behavior
 or successful EHCI enumeration is established by those tests.
+
+The extended test entry point has four unittest tests, all passing without
+skips on this host. In addition to the 18 existing host power cases, it runs
+the actual PMGR helper, register-dump helper and OTG initialization function
+against fake register arrays: a 1,000-poll timeout produces no PHY reset
+writes, and an acknowledged retry produces exactly the previous reset values
+and delays while preserving both tuning registers. A temporary historical
+control reverses only the checked-return correction and deliberately fails
+the same contract with exit status 42: `return=0, PHY writes=2, post-gate
+delays=4`. It never edits the production source.
+
+Four further cases compile the complete production probe and distinguish an
+absent second resource, mapping failures `-ENOMEM` and `-EBUSY`, and a mapped
+resource. The fake mapping/provider callbacks do not map physical memory.
+These tests use UBSan and strict compiler warnings; they establish software
+error propagation, not actual hardware acknowledgement, voltages or routing.

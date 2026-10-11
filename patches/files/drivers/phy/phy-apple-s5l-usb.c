@@ -164,6 +164,7 @@ static void phy_dump_regs(struct s5l_usbphy *p, const char *tag)
 static int s5l_usbphy_init(struct phy *phy)
 {
 	struct s5l_usbphy *p = phy_get_drvdata(phy);
+	int ret;
 
 	dev_info(p->dev, "PHY init start\n");
 
@@ -182,7 +183,9 @@ static int s5l_usbphy_init(struct phy *phy)
 		 readl(p->pmgr + PMGR_USB_OTG), readl(p->pmgr + PMGR_USB_EHCI),
 		 readl(p->pmgr + PMGR_USB_OHCI0), readl(p->pmgr + PMGR_USB_OHCI1));
 
-	s5l_pmgr_on(p, PMGR_USB_OTG);
+	ret = s5l_pmgr_on(p, PMGR_USB_OTG);
+	if (ret)
+		return ret;
 
 	dev_info(p->dev, "usb-complex OTG(88) now 0x%08x\n",
 		 readl(p->pmgr + PMGR_USB_OTG));
@@ -388,7 +391,7 @@ static int s5l_usbphy_probe(struct platform_device *pdev)
 	if (platform_get_resource(pdev, IORESOURCE_MEM, 1)) {
 		p->usbcplx = devm_platform_ioremap_resource(pdev, 1);
 		if (IS_ERR(p->usbcplx))
-			p->usbcplx = NULL;
+			return PTR_ERR(p->usbcplx);
 	}
 	platform_set_drvdata(pdev, p);
 

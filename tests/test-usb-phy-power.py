@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run actual S5L host-PHY callbacks with fake supplies and PMGR, offline."""
+"""Run actual S5L PHY callbacks/probe with fake supplies and MMIO, offline."""
 from pathlib import Path
 import re
 import shutil
@@ -11,8 +11,8 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / 'patches/files/drivers/phy/phy-apple-s5l-usb.c'
 
 
-def function(text, name):
-    start = text.index('static int ' + name + '(')
+def function(text, name, return_type='int'):
+    start = text.index('static ' + return_type + ' ' + name + '(')
     brace = text.index('{', start)
     depth, end = 1, brace + 1
     while depth:
@@ -146,6 +146,221 @@ int main(void) {
                             '-Werror', '-fsanitize=undefined', str(source), '-o', str(binary)],
                            check=True)
             subprocess.run([str(binary)], check=True)
+
+
+@unittest.skipUnless(shutil.which('cc'), 'requires a C compiler')
+class OTGLifecycle(unittest.TestCase):
+    @staticmethod
+    def run_c(source):
+        with tempfile.TemporaryDirectory(prefix='cascadia-phy-lifecycle-') as td:
+            path, binary = Path(td) / 'lifecycle.c', Path(td) / 'lifecycle'
+            path.write_text(source)
+            subprocess.run(['cc', '-std=gnu11', '-O1', '-g', '-Wall', '-Wextra',
+                            '-Werror', '-fsanitize=undefined', str(path), '-o', str(binary)],
+                           check=True, capture_output=True, text=True)
+            return subprocess.run([str(binary)], capture_output=True, text=True)
+
+    @staticmethod
+    def init_harness(text):
+        # Keep the actual gate polling and register dump; no error-return oracle
+        # is substituted for s5l_pmgr_on(). All mapped registers are C arrays.
+        macros = '\n'.join(line for line in text.splitlines()
+                           if line.startswith('#define '))
+        harness = r'''
+#include <assert.h>
+#include <errno.h>
+#include <stdint.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <string.h>
+#define BIT(n) (1u << (n))
+typedef uint32_t u32;
+struct device { int unused; };
+struct s5l_usbphy { void *base, *pmgr; struct device *dev; };
+struct phy { struct s5l_usbphy *data; };
+static struct s5l_usbphy *phy_get_drvdata(struct phy *phy) { return phy->data; }
+static void log_message(const char *fmt, ...) { (void)fmt; }
+static void device_message(struct device *dev, const char *fmt, ...) { (void)dev; (void)fmt; }
+#define dev_info(...) device_message(__VA_ARGS__)
+#define dev_err(...) device_message(__VA_ARGS__)
+#define pr_err(...) log_message(__VA_ARGS__)
+/* SOURCE_MACROS */
+static uint32_t phy_regs[0x1000/4], gate_regs[0x2000/4];
+static unsigned phy_writes, gate_writes, delays[16], delay_count, gate_polls;
+static uint32_t write_values[2], write_offsets[2];
+static bool requested, acknowledge;
+static uint32_t readl(void *address) {
+ if (address==&gate_regs[PMGR_USB_OTG/4] && requested) {
+  gate_polls++;
+  if (acknowledge) {
+   uint32_t v=*(uint32_t *)address;
+   *(uint32_t *)address=(v & ~0xf0u) | ((v & 0xfu)<<4);
+  }
+ }
+ return *(uint32_t *)address;
+}
+static void writel(uint32_t value, void *address) {
+ uintptr_t a=(uintptr_t)address, b=(uintptr_t)phy_regs;
+ if (a>=b && a<b+sizeof(phy_regs)) {
+  assert(phy_writes<2);
+  write_offsets[phy_writes]=(uint32_t)(a-b);
+  write_values[phy_writes++]=value;
+ } else {
+  assert(address==&gate_regs[PMGR_USB_OTG/4]);
+  gate_writes++; requested=true;
+ }
+ *(uint32_t *)address=value;
+}
+static void udelay(unsigned us) {
+ /* Gate poll delays are distinguished from the post-gate PHY sequence. */
+ if (us==1) return;
+ assert(delay_count<16); delays[delay_count++]=us;
+}
+''' .replace('/* SOURCE_MACROS */', macros)
+        return harness + '\n'.join((function(text, 's5l_pmgr_on'),
+                                     function(text, 'phy_dump_regs', 'void'),
+                                     function(text, 's5l_usbphy_init')))
+
+    def test_otg_gate_timeout_stops_before_phy_reset_and_can_retry(self):
+        harness = self.init_harness(SOURCE.read_text()) + r'''
+int main(void) {
+ struct device dev={0}; struct s5l_usbphy p={phy_regs,gate_regs,&dev};
+ struct phy phy={&p}; unsigned cases=0;
+ phy_regs[ORSTCON/4]=0xa0;
+ phy_regs[0x40/4]=0x549; phy_regs[0x44/4]=0x2ff3;
+ gate_regs[PMGR_USB_OTG/4]=0xf1230120;
+ acknowledge=false;
+ assert(s5l_usbphy_init(&phy)==-ETIMEDOUT);
+ assert(gate_writes==1 && gate_polls==1000);
+ assert(gate_regs[PMGR_USB_OTG/4]==((0xf1230120u & ~0x10fu)|0xfu));
+ assert(!phy_writes && !delay_count && phy_regs[ORSTCON/4]==0xa0);
+ assert(phy_regs[0x40/4]==0x549 && phy_regs[0x44/4]==0x2ff3); cases++;
+ acknowledge=true;
+ assert(!s5l_usbphy_init(&phy));
+ assert(gate_writes==2 && phy_writes==2);
+ assert(write_offsets[0]==ORSTCON && write_offsets[1]==ORSTCON);
+ assert(write_values[0]==0xa1 && write_values[1]==0xa0);
+ assert(delay_count==4 && delays[0]==100 && delays[1]==10 && delays[2]==20 && delays[3]==1000);
+ assert(phy_regs[0x40/4]==0x549 && phy_regs[0x44/4]==0x2ff3); cases++;
+ printf("OTG PHY: %u actual initialization cases passed\n",cases);
+ return 0;
+}
+'''
+        result = self.run_c(harness)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('2 actual initialization cases passed', result.stdout)
+
+    def test_legacy_init_reports_success_and_resets_after_gate_timeout(self):
+        text = SOURCE.read_text()
+        checked = ('ret = s5l_pmgr_on(p, PMGR_USB_OTG);\n'
+                   '\tif (ret)\n\t\treturn ret;')
+        self.assertEqual(text.count(checked), 1)
+        # Restore only the historical ignored-return statement in a temporary
+        # extraction. The production source is never rewritten by this test.
+        text = text.replace(checked, 's5l_pmgr_on(p, PMGR_USB_OTG);')
+        extracted = function(text, 's5l_usbphy_init')
+        self.assertEqual(extracted.count('\tint ret;'), 1)
+        text = text.replace(extracted, extracted.replace('\tint ret;\n', ''))
+        harness = self.init_harness(text) + r'''
+int main(void) {
+ struct device dev={0}; struct s5l_usbphy p={phy_regs,gate_regs,&dev};
+ struct phy phy={&p}; phy_regs[ORSTCON/4]=0xa0;
+ int ret=s5l_usbphy_init(&phy);
+ /* This same timeout contract deliberately fails on the historical code. */
+ if (ret!=-ETIMEDOUT || phy_writes || delay_count) {
+  fprintf(stderr,"legacy false success: return=%d, PHY writes=%u, post-gate delays=%u\n",
+          ret,phy_writes,delay_count);
+  return 42;
+ }
+ return 0;
+}
+'''
+        result = self.run_c(harness)
+        self.assertEqual(result.returncode, 42, result.stderr)
+        self.assertIn('return=0, PHY writes=2, post-gate delays=4', result.stderr)
+
+    def test_probe_distinguishes_missing_optional_resource_and_mapping_error(self):
+        text = SOURCE.read_text()
+        harness = r'''
+#include <assert.h>
+#include <errno.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#define GFP_KERNEL 0
+#define IORESOURCE_MEM 0
+#define PMGR_BASE 0x3f100000
+#define IS_ERR(p) ((intptr_t)(p)<0)
+#define PTR_ERR(p) ((int)(intptr_t)(p))
+#define ERR_PTR(e) ((void *)(intptr_t)(e))
+#define dev_info(...) ((void)0)
+#define dev_err(...) ((void)0)
+struct device { int unused; };
+struct phy { int unused; };
+struct phy_provider { int unused; };
+struct s5l_usbphy { void *base, *pmgr, *usbcplx; struct device *dev; struct phy *phys[2]; };
+struct platform_device { struct device dev; };
+static struct s5l_usbphy object;
+static struct phy fake_phys[2];
+static struct phy_provider provider;
+static int s5l_usbphy_ops, s5l_hostphy_ops, s5l_usbphy_xlate;
+static unsigned map_calls[2], created, published, drvdata;
+static int map_error;
+static bool optional_present;
+static void *devm_kzalloc(struct device *dev, size_t size, int flags) {
+ (void)dev; assert(size==sizeof(object) && flags==GFP_KERNEL);
+ memset(&object,0,sizeof(object)); return &object;
+}
+static void *devm_platform_ioremap_resource(struct platform_device *p, int index) {
+ (void)p; assert(index==0 || index==1); map_calls[index]++;
+ return index && map_error ? ERR_PTR(map_error) : (void *)(uintptr_t)(0x1000+index*0x1000);
+}
+static void *devm_ioremap(struct device *dev, unsigned base, size_t size) {
+ (void)dev; assert(base==PMGR_BASE && size==0x2000); return (void *)(uintptr_t)0x3000;
+}
+static void *platform_get_resource(struct platform_device *p, int type, int index) {
+ (void)p; assert(type==IORESOURCE_MEM && index==1);
+ return optional_present ? (void *)(uintptr_t)1 : NULL;
+}
+static void platform_set_drvdata(struct platform_device *p, struct s5l_usbphy *data) {
+ (void)p; assert(data==&object); drvdata++;
+}
+static struct phy *devm_phy_create(struct device *dev, void *node, int *ops) {
+ (void)dev; assert(!node && created<2);
+ assert(ops==(created ? &s5l_hostphy_ops : &s5l_usbphy_ops)); return &fake_phys[created++];
+}
+static void phy_set_drvdata(struct phy *phy, struct s5l_usbphy *data) {
+ assert((phy==&fake_phys[0] || phy==&fake_phys[1]) && data==&object);
+}
+static struct phy_provider *devm_of_phy_provider_register(struct device *dev, int xlate) {
+ (void)dev; assert(xlate==s5l_usbphy_xlate); published++; return &provider;
+}
+''' + function(text, 's5l_usbphy_probe') + r'''
+int main(void) {
+ struct platform_device p={0}; unsigned cases=0;
+ optional_present=false;
+ assert(!s5l_usbphy_probe(&p));
+ assert(!object.usbcplx && !map_calls[1] && created==2 && published==1); cases++;
+ map_calls[0]=map_calls[1]=created=published=drvdata=0;
+ optional_present=true; map_error=-ENOMEM;
+ assert(s5l_usbphy_probe(&p)==-ENOMEM);
+ assert(map_calls[1]==1 && !created && !published && !drvdata); cases++;
+ map_calls[0]=map_calls[1]=created=published=drvdata=0;
+ map_error=-EBUSY;
+ assert(s5l_usbphy_probe(&p)==-EBUSY);
+ assert(map_calls[1]==1 && !created && !published && !drvdata); cases++;
+ map_calls[0]=map_calls[1]=created=published=drvdata=0;
+ map_error=0;
+ assert(!s5l_usbphy_probe(&p));
+ assert(object.usbcplx==(void *)(uintptr_t)0x2000 && created==2 && published==1); cases++;
+ printf("USB PHY probe: %u actual resource cases passed\n",cases);
+ return 0;
+}
+'''
+        result = self.run_c(harness)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('4 actual resource cases passed', result.stdout)
 
 
 if __name__ == '__main__':
