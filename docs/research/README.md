@@ -16,8 +16,8 @@ test. The normal boot procedure remains [QUICKSTART](../QUICKSTART.md).
 
 | Area | Implemented and tested offline | Still unresolved |
 | --- | --- | --- |
-| Battery/PMU | Atomic HDQ cache, break failure handling, discharge status, GPIO errors, removal of event-consuming probe dump | Complete charger initialization, battery/fault protection, voltage/termination policy and hardware verification |
-| NAND | Read progress/ECC errors, explicit read-only MEMREAD backend, strict metadata/cache checks, reduced mapper memory, NBD bounds/setup/worker cleanup | Actual target capacity/performance, shell PID control, writable PPN/FTL and Linux-owned storage |
+| Battery/PMU | Atomic HDQ cache, valid percentage range, break failure handling, discharge status, GPIO errors, removal of event-consuming probe dump | Complete charger initialization, battery/fault protection, voltage/termination policy and hardware verification |
+| NAND | Read progress/ECC errors, explicit read-only MEMREAD backend, strict metadata/cache checks, reduced mapper memory, NBD bounds/setup/worker cleanup, pidfd control and generation-bound System readiness | Actual process/sysfs hardware integration, target capacity/performance, writable PPN/FTL and Linux-owned storage |
 | USB | Host-only build/link, bounded ADT parser, PHY power-error handling, isolated HID/storage profile | Complete connector routing, external 5 V VBUS/protection, role transitions and real peripherals |
 
 Charging evidence:
@@ -42,6 +42,7 @@ Storage and USB evidence:
 - [THS7383 accessory routing and orientation](p105-tristar-routing.md)
 - [Accessory rail callbacks and ID-derived voltage](p105-accessory-power.md)
 - [Accessory switch GPIO descriptor and simulated provider](p105-accessory-gpio.md)
+- [SoC GPIO mux-mask comparison and remaining policy differences](p105-soc-gpio-masks.md)
 
 Run `python3 scripts/test-offline.py` from the repository root. It runs all
 `tests/test*.py` entry points, including names with hyphens. C fixtures use a
