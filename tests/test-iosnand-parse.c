@@ -31,7 +31,9 @@ static int fake_mtd_ioctl(int fd, unsigned long request, void *arg)
             uint8_t *m = oob + c * 16;
             memset(m, 0, 16);
             m[0] = 1;
-            m[2] = 100 + c;
+            const uint64_t seq[] = { 100, 107, 0, 900 };
+            for (unsigned i = 0; i < 6; i++)
+                m[2 + i] = seq[c] >> (8 * i);
             m[8] = 3 + c;
         }
     req->start += req->len;
@@ -166,10 +168,10 @@ int main(void)
     assert(!cache_records_valid());
     checks++;
     blocks[0][1].head_seq = 1;
-    pages[0][1][0].seq = UINT64_MAX;
-    assert(!cache_records_valid());
+    memset(pages[0][1][0].seq, 0xff, sizeof(pages[0][1][0].seq));
+    assert(page_seq(&pages[0][1][0], 3) == (1ull << 48) - 1);
     checks++;
-    pages[0][1][0].seq = (1ull << 48) - 1;
+    assert(page_seq(&pages[0][1][0], 0) == (1ull << 48) - 1);
     assert(cache_records_valid());
     checks++;
     memset(blocks, 0, sizeof(blocks));
@@ -179,7 +181,11 @@ int main(void)
     assert(scan_block(0, 1, 0) == 0);
     assert(fake_mtd_reads == PPN_PAGES);
     assert(blocks[0][1].written == PPN_PAGES);
-    assert(pages[0][1][1].lba[0] == 3 && pages[0][1][1].seq == 100);
+    assert(pages[0][1][1].lba[0] == 3 && page_seq(&pages[0][1][1], 0) == 100);
+    assert(page_seq(&pages[0][1][1], 1) == 107);
+    assert(page_seq(&pages[0][1][1], 2) == 0);
+    assert(page_seq(&pages[0][1][1], 3) == 900);
+    checks += 3;
     assert(pages[0][1][0].lba[0] == NONE && pages[0][1][255].lba[0] == NONE);
     checks++;
     fake_mtd_unsupported = 1;

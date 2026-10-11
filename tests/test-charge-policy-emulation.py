@@ -27,7 +27,9 @@ class ChargePolicy(unittest.TestCase):
     def test_outside_temperature_table_returns_zero_including_negative(self):
         for temperature in (-100, 0, 999, 4501, 10000):
             with self.subTest(temperature=temperature):
-                self.assertEqual(self.policy().sample(temperature, 3900)['policy_ceiling_mA'], 0)
+                sample = self.policy().sample(temperature, 3900)
+                self.assertEqual(sample['policy_ceiling_mA'], 0)
+                self.assertEqual(sample['reason'], 'LowTemperature' if temperature < 1000 else 'HighTemperature')
 
     def test_inclusive_voltage_thresholds_and_current_taper(self):
         for temperature, currents in ((1100, (2520, 2520, 2240, 2240, 1320)),
@@ -68,6 +70,43 @@ class ChargePolicy(unittest.TestCase):
             for kc, adt in ((bad, ADT), (KC, bad)):
                 with self.assertRaises(ValueError):
                     self.m.load_inputs(kc, adt)
+
+    def test_usb_report_budget_and_separate_stack_types(self):
+        for stack_type, expected, calls in ((0, 100, 0), (1, 100, 0), (2, 1000, 1),
+                                            (3, 1500, 0), (4, 1000, 1), (5, 100, 0)):
+            with self.subTest(stack_type=stack_type):
+                sample = self.m.InputBudget(self.data).sample_budget(5, usb_type=stack_type)
+                self.assertEqual(sample['return_code'], 0)
+                self.assertEqual(sample['computed_budget_mA'], expected)
+                self.assertEqual(len(sample['policy_calls']), calls)
+                if calls:
+                    self.assertEqual(sample['policy_calls'][0]['method'], 'actual return1000')
+        sample = self.m.InputBudget(self.data).sample_budget(5, usb_report_ma=500)
+        self.assertEqual(sample['computed_budget_mA'], 500)
+
+    def test_disabled_and_other_profile_budgets(self):
+        for profile, expected in ((4, 0), (6, 500)):
+            self.assertEqual(self.m.InputBudget(self.data).sample_budget(profile)['computed_budget_mA'], expected)
+        for profile in (0, 1, 2, 3, 8, 9):
+            sample = self.m.InputBudget(self.data).sample_budget(profile)
+            self.assertNotEqual(sample['return_code'], 0)
+            self.assertIsNone(sample['computed_budget_mA'])
+
+    def test_brick_table_and_unknown_index_fallback(self):
+        for index, expected in ((0, 1000), (1, 500), (2, 1000), (3, 1000),
+                                (4, 2100), (5, 2400), (6, 1000)):
+            with self.subTest(index=index):
+                self.assertEqual(self.m.InputBudget(self.data).sample_budget(7, brick_index=index)
+                                 ['computed_budget_mA'], expected)
+
+    def test_input_adjustment_override_and_cap(self):
+        for arguments, expected in (({'offset_ma': -150}, 0), ({'offset_ma': -25}, 75),
+                                    ({'offset_ma': 50}, 150), ({'override_ma': 1000}, 1000),
+                                    ({'override_ma': 1000, 'cap_ma': 500}, 500),
+                                    ({'offset_ma': 50, 'cap_ma': 125}, 125)):
+            with self.subTest(arguments=arguments):
+                self.assertEqual(self.m.InputBudget(self.data).sample_budget(5, **arguments)
+                                 ['computed_budget_mA'], expected)
 
 
 if __name__ == '__main__':

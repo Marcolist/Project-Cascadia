@@ -234,9 +234,10 @@ fault interrupts or the analog battery. The 70 cold-start cases and one
 temperature sequence are private
 `../references/charging-research/charge-policy-emulation.json`.
 
-Its seven regression tests check negative/out-of-range temperature exclusion,
+Its eleven regression tests check negative/out-of-range temperature exclusion,
 inclusive voltage thresholds and taper, first-match overlaps, cached-row
-hysteresis, all four charge caps, inhibition flags and both firmware hashes:
+hysteresis, all four charge caps, inhibition flags, both firmware hashes and
+the USB/adapter budget arithmetic described below:
 
 ```sh
 python3 tests/test-charge-policy-emulation.py
@@ -245,11 +246,56 @@ python3 tools/power/emulate-charge-policy.py \
   build/usb-host-research/firmware/DeviceTree.p105ap.raw
 ```
 
-All ten backend tests and all seven policy tests passed in the existing
+All ten backend tests and all eleven policy tests passed in the existing
 resource-limited build image with Unicorn 2.1.4. The gauge production-C test
 also passed with GCC undefined-behavior sanitizer. Four independently reverted
 fixes each compiled and then failed their intended test assertion, confirming
 that those tests detect the corrected behavior.
+
+## USB source budget: enumeration and adapter classification differ
+
+`0x804c75b8` uses source-description names from table `0x804d9940`:
+`error`, `batt`, `unsupported`, `firewire`, `usb disabled`, `usb host`,
+`usb device`, `usb brick`, `ac`, `external` for enums 0..9. This source
+description is stored at byte offset 0x104 per port. The budget helper uses
+a **separate** profile byte at offset 0x106. Numeric equality alone does not
+prove identical enum types or the classification of an actual cable.
+
+The actual `0x804c8014` helper, reached through `0x804c80e4`, applies:
+
+| Profile at offset 0x106 | Budget calculation observed |
+| --- | --- |
+| 4 | 0 mA. |
+| 5 | Uses USB stack type/report at 0x168/0x160. Type 3 gives 1500 mA; types 2/4 call the owner's policy method at vptr+0x350, which returns 1000 mA for AppleARMPMUPowerSource; other types use the stack-reported current. |
+| 6 | 500 mA. |
+| 7 | Adapter index at 0x178 maps 1..5 to 500, 1000, 1000, 2100, 2400 mA; unknown index gives 1000 mA. |
+| Others | Returns an error without producing a valid budget. |
+
+An optional override at 0x114 replaces the base value when byte 0x110 is set.
+Wrapper `0x804c80e4` then applies signed offset 0x128, flooring subtraction at
+zero, and applies the optional 0x120 cap when byte 0x11c is set. This explains
+why the largest adapter-table value is not itself the board's allowed input.
+
+The instance constructor at `0x804c6108` stores vptr `0x804d9588`. Its slot
++0x350 resolves to `0x804c800c`, whose actual instructions unconditionally
+return 1000 mA. Its slot +0x354 resolves to reset helper `0x804c8158`.
+
+The policy emulator executes both budget functions and the actual 1000 mA
+policy callback. Every callback invocation is in its JSON output. The Python
+class also supports an explicit synthetic policy override for experiments,
+labelled `mocked`; neither the default CLI run nor the regression tests use it.
+Tests distinguish a 100/500 mA USB report from adapter budgets,
+the 1500 branch, unknown adapter fallback, invalid profile, signed adjustment,
+override and cap. The actual source-detection producer is not emulated;
+**no USB source is reclassified or granted additional current**.
+
+Reset helper `0x804c8158`, when its reason argument is 1, stores 100 mA at
+0x160 and clears USB stack type and adapter index at 0x168/0x178. It resets
+additional state and converts profiles at least 2 to profile 4. The caller
+and exact connection/suspend/detach event meaning still need verification;
+this is not yet proof of a complete detach shutdown path. The helper makes
+clear that carrying an old negotiated budget into a new connection would be
+incorrect. No reset/classification callback was added to Linux.
 
 ## Status, faults and interrupt-consumption evidence
 

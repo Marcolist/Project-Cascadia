@@ -129,6 +129,31 @@ def cable_role_evidence(data):
             "caveat": "firmware mux semantics only; this does not enable VBUS, authenticate an accessory, or prove a Linux host boot"}
 
 
+def accessory_rail_evidence(data):
+    table = pic_literal_pointer(data, 0x80ece7d0, 0x80ece7da, 0)
+    if table != 0x80ed2ec8:
+        raise ValueError("audited D1946 LDO table pointer mismatch")
+    rails = []
+    for index, function in ((5, "function-acc_pwr"), (22, "function-acc_sleep_pwr")):
+        offset = address_offset(data, table + 12 * index)
+        raw = data[offset:offset + 12]
+        if len(raw) != 12:
+            raise ValueError("truncated D1946 LDO entry")
+        minimum, step, codes, voltage_mask, shared_mask, voltage_reg, enable_reg, enable_mask, _ = struct.unpack("<H4BHHBB", raw)
+        rails.append({"adt_dock_function": function, "ldo_table_index": index,
+                      "raw_entry_hex": raw.hex(), "voltage_minimum_firmware_units": minimum,
+                      "voltage_maximum_firmware_units": minimum + step * codes,
+                      "voltage_step_firmware_units": step,
+                      "voltage_register": hex(voltage_reg), "voltage_mask": hex(voltage_mask),
+                      "enable_register": hex(enable_reg), "enable_mask": hex(enable_mask),
+                      "optional_shared_register": "0x7c", "shared_mask": hex(shared_mask),
+                      "is_verified_5v_vbus_source": False,
+                      "caveat": "static dispatch/table evidence; no measured rail or power-enable permission"})
+    return {"set_ldo_method": "0x80ece79c", "ldo_function_call": "0x80ecf4a0",
+            "ldo_table": hex(table), "entry_size": 12, "rails": rails,
+            "important": "LDO 5 maximum 3300 firmware voltage units is not a 5 V source. Adapter-side conversion or external power requires separate evidence."}
+
+
 def phy_values(adt):
     node, end = dtparse.parse_node(adt, 0)
     if end != len(adt):
@@ -203,6 +228,7 @@ def plan(kernelcache, adt):
                        "phy_file_offset": hex(phy_offset), "host_method": "0x80cac200",
                        "IODelay_symbol": hex(delay)},
             "controller_role_evidence": cable_role_evidence(kernelcache),
+            "accessory_rail_evidence": accessory_rail_evidence(kernelcache),
             "hsic_state": {"adt_hsic_enabled_property_present": hsic_property,
                            "firmware_bootarg_hsic_default": 1,
                            "object_field": "+0x50", "base_start": "0x8086180c",

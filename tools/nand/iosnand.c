@@ -19,7 +19,7 @@
  *                              /dev/nbd0, /dev/nbd1 ... and serve them until
  *                              SIGTERM; read-only, writes are refused
  *
- * The cache is /var/lib/iosnand/pages.v1 (IOSNAND_CACHE overrides).  Both NAND
+ * The cache is /var/lib/iosnand/pages.v2 (IOSNAND_CACHE overrides).  Both NAND
  * buses stay locked while iosnand runs.  IOSNAND_BACKEND=mtd explicitly opts
  * into the read-only kernel driver instead of /dev/mem; the default is pio.
  * MTD failures never fall back to PIO.  MTD mode scans every page each time,
@@ -68,19 +68,26 @@ struct block_rec {
 };
 
 struct page_rec {
-    uint64_t seq;               /* chunk 0's; chunk k is seq + k; 0 = none */
-    uint32_t lba[4];            /* NONE unless user data */
+    uint8_t seq[4][6];          /* exact little-endian u48 for each chunk */
+    uint32_t lba[4];            /* NONE unless user data; sequence 0 is valid */
 };
 
 struct cache_hdr {
-    char magic[8];              /* "IOSNAND1" */
-    uint32_t dies, blocks, pages, rsvd;
+    char magic[8];              /* "IOSNAND2": v1 assumed seq+k and cannot migrate */
+    uint32_t dies, blocks, pages, record_size;
+    uint64_t payload_size;
+    uint32_t crc32, rsvd;
 };
+
+_Static_assert(sizeof(struct page_rec) == 40, "cache v2 page ABI");
+_Static_assert(sizeof(struct block_rec) == 16, "cache v2 block ABI");
+_Static_assert(sizeof(struct cache_hdr) == 40, "cache v2 header ABI");
+_Static_assert(__BYTE_ORDER == __LITTLE_ENDIAN, "cache format is little-endian");
 
 static struct block_rec blocks[PPN_DIES][PPN_BLOCKS];
 static struct page_rec (*pages)[PPN_BLOCKS][PPN_PAGES];
 static uint32_t *l2p;           /* LBA -> ((die * blocks + blk) * pages + pg) * 4 + chunk */
-static const char *cache_path = "/var/lib/iosnand/pages.v1";
+static const char *cache_path = "/var/lib/iosnand/pages.v2";
 
 static uint64_t now_ms(void)
 {
@@ -102,64 +109,177 @@ static uint32_t meta_lba(const uint8_t *m)
     return m[0] == 1 ? (uint32_t)m[8] | m[9] << 8 | m[10] << 16 | (uint32_t)m[11] << 24 : NONE;
 }
 
+static uint64_t page_seq(const struct page_rec *p, unsigned chunk)
+{
+    uint64_t s = 0;
+    for (int i = 5; i >= 0; i--)
+        s = s << 8 | p->seq[chunk][i];
+    return s;
+}
+
 /* ---- the page table cache ---------------------------------------------- */
 
 static int cache_records_valid(void)
 {
-    const uint64_t maxseq = (1ull << 48) - 1;
     for (int die = 0; die < PPN_DIES; die++)
         for (int blk = 0; blk < PPN_BLOCKS; blk++) {
             const struct block_rec *b = &blocks[die][blk];
-            /* written is consumed as an array bound by build_l2p().
-             * A stale/corrupt cache is only a hint and must never let it
-             * walk past pages[die][blk][256]. */
-            if (b->written > PPN_PAGES || b->state > B_BAD || b->head_seq > maxseq)
+            /* written is consumed as an array bound by build_l2p(). */
+            if (b->written > PPN_PAGES || b->state > B_BAD || b->head_seq >= (1ull << 48))
                 return 0;
-            for (int pg = 0; pg < b->written; pg++)
-                if (pages[die][blk][pg].seq > maxseq)
-                    return 0;
         }
     return 1;
 }
 
+/* IEEE CRC32 detects accidental payload corruption, not malicious edits.
+ * It covers every record, including pages outside a block's write pointer. */
+static uint32_t cache_crc32(void)
+{
+    uint32_t table[256];
+    for (unsigned i = 0; i < 256; i++) {
+        uint32_t c = i;
+        for (unsigned bit = 0; bit < 8; bit++)
+            c = (c >> 1) ^ (0xedb88320u & (0u - (c & 1)));
+        table[i] = c;
+    }
+    uint32_t crc = UINT32_MAX;
+    const uint8_t *data[] = { (const void *)blocks, (const void *)pages };
+    const size_t len[] = { sizeof(blocks), sizeof(*pages) * PPN_DIES };
+    for (unsigned part = 0; part < 2; part++)
+        for (size_t i = 0; i < len[part]; i++)
+            crc = table[(crc ^ data[part][i]) & 255] ^ (crc >> 8);
+    return ~crc;
+}
+
+/* Only regular cache files are allowed. Reject other paths before touching
+ * a device backend; in particular an existing FIFO must not block startup. */
+static FILE *cache_open(void)
+{
+    struct stat before, after;
+    if (lstat(cache_path, &before))
+        return NULL;
+    if (!S_ISREG(before.st_mode)) {
+        errno = EINVAL;
+        return NULL;
+    }
+    int fd = open(cache_path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+    if (fd < 0)
+        return NULL;
+    if (fstat(fd, &after) || !S_ISREG(after.st_mode) ||
+        before.st_dev != after.st_dev || before.st_ino != after.st_ino) {
+        close(fd);
+        errno = EINVAL;
+        return NULL;
+    }
+    FILE *f = fdopen(fd, "rb");
+    if (!f)
+        close(fd);
+    return f;
+}
+
+/* 0 = loaded, -1 = missing/corrupt v2 (rescan), -2 = foreign/unreadable path
+ * (stop). An old v1 has lost individual chunk sequences: never infer them or
+ * overwrite it. Explicit overrides must point at a new file or a v2 cache. */
 static int cache_load(void)
 {
     struct cache_hdr h;
-    FILE *f = fopen(cache_path, "rb");
-    if (!f)
-        return -1;
-    if (fread(&h, sizeof(h), 1, f) != 1 || memcmp(h.magic, "IOSNAND1", 8) ||
+    FILE *f = cache_open();
+    if (!f) {
+        if (errno == ENOENT)
+            return -1;
+        fprintf(stderr, "iosnand: refusing cache path %s: %s\n", cache_path, strerror(errno));
+        return -2;
+    }
+    if (fread(h.magic, sizeof(h.magic), 1, f) != 1 || memcmp(h.magic, "IOSNAND2", 8)) {
+        fclose(f);
+        fprintf(stderr, "iosnand: %s is v1 or an unknown cache; choose a new IOSNAND_CACHE path\n", cache_path);
+        return -2;
+    }
+    const size_t page_bytes = sizeof(*pages) * PPN_DIES;
+    if (fread((char *)&h + 8, sizeof(h) - 8, 1, f) != 1 ||
         h.dies != PPN_DIES || h.blocks != PPN_BLOCKS || h.pages != PPN_PAGES ||
+        h.record_size != sizeof(struct page_rec) || h.rsvd ||
+        h.payload_size != sizeof(blocks) + page_bytes ||
         fread(blocks, sizeof(blocks), 1, f) != 1 ||
-        fread(pages, sizeof(*pages) * PPN_DIES, 1, f) != 1 ||
-        !cache_records_valid()) {
+        fread(pages, page_bytes, 1, f) != 1 || fgetc(f) != EOF || ferror(f) ||
+        !cache_records_valid() || h.crc32 != cache_crc32()) {
         fclose(f);
         fprintf(stderr, "iosnand: %s unusable, starting over\n", cache_path);
         memset(blocks, 0, sizeof(blocks));
+        memset(pages, 0, page_bytes);
         return -1;
     }
     fclose(f);
     return 0;
 }
 
-static void cache_save(void)
+static int cache_replaceable(void)
 {
-    struct cache_hdr h = { "IOSNAND1", PPN_DIES, PPN_BLOCKS, PPN_PAGES, 0 };
-    char tmp[256], dir[256];
-    snprintf(dir, sizeof(dir), "%s", cache_path);
+    FILE *old = cache_open();
+    if (!old)
+        return errno == ENOENT ? 0 : -1;
+    char magic[8];
+    int is_v2 = fread(magic, sizeof(magic), 1, old) == 1 && !memcmp(magic, "IOSNAND2", 8);
+    fclose(old);
+    if (!is_v2) {
+        errno = EINVAL;
+        return -1;
+    }
+    return 0;
+}
+
+static int cache_save(void)
+{
+    if (cache_replaceable()) {
+        fprintf(stderr, "iosnand: refusing cache replacement %s: %s\n", cache_path, strerror(errno));
+        return -1;
+    }
+    struct cache_hdr h = { "IOSNAND2", PPN_DIES, PPN_BLOCKS, PPN_PAGES,
+                          sizeof(struct page_rec), sizeof(blocks) + sizeof(*pages) * PPN_DIES,
+                          cache_crc32(), 0 };
+    char *dir = strdup(cache_path), *tmp = malloc(strlen(cache_path) + 12);
+    if (!dir || !tmp) {
+        free(dir);
+        free(tmp);
+        fprintf(stderr, "iosnand: cannot allocate cache path\n");
+        return -1;
+    }
     char *slash = strrchr(dir, '/');
-    if (slash) {
+    if (slash && slash != dir) {
         *slash = 0;
-        mkdir(dir, 0755);
+        mkdir(dir, 0700);
     }
-    snprintf(tmp, sizeof(tmp), "%s.tmp", cache_path);
-    FILE *f = fopen(tmp, "wb");
-    if (!f || fwrite(&h, sizeof(h), 1, f) != 1 || fwrite(blocks, sizeof(blocks), 1, f) != 1 ||
-        fwrite(pages, sizeof(*pages) * PPN_DIES, 1, f) != 1 || fclose(f)) {
-        perror(tmp);
-        return;
+    free(dir);
+    sprintf(tmp, "%s.tmp.XXXXXX", cache_path);
+    int fd = mkstemp(tmp);      /* private 0600; never follows a fixed .tmp symlink */
+    FILE *f = fd < 0 ? NULL : fdopen(fd, "wb");
+    int ret = -1;
+    if (!f) {
+        if (fd >= 0)
+            close(fd);
+        goto done;
     }
-    rename(tmp, cache_path);
+    int ok = fwrite(&h, sizeof(h), 1, f) == 1 &&
+             fwrite(blocks, sizeof(blocks), 1, f) == 1 &&
+             fwrite(pages, sizeof(*pages) * PPN_DIES, 1, f) == 1 &&
+             !fflush(f) && !fsync(fileno(f));
+    if (fclose(f))
+        ok = 0;
+    if (!ok)
+        goto done;
+    /* Recheck identity before publication as well: a foreign/old file that
+     * appeared after startup must remain intact. Cooperative users hold the
+     * PPN locks; this does not claim protection against hostile path races. */
+    if (cache_replaceable())
+        goto done;
+    ret = rename(tmp, cache_path);
+done:
+    if (ret)
+        fprintf(stderr, "iosnand: cache save %s failed: %s\n", cache_path, strerror(errno));
+    if (fd >= 0)
+        unlink(tmp);           /* only if we created it; rename removed it on success */
+    free(tmp);
+    return ret;
 }
 
 /* ---- scanning ------------------------------------------------------------ */
@@ -178,8 +298,6 @@ static int read_raw(int die, int blk, int pg, uint32_t len, uint8_t *st)
     return 0;
 }
 
-static unsigned seq_gaps;
-
 /* pages from..255 of a block; returns -1 on a bus failure */
 static int scan_block(int die, int blk, int from)
 {
@@ -195,19 +313,15 @@ static int scan_block(int die, int blk, int from)
                 memset(&pages[die][blk][pg], 0, sizeof(struct page_rec));
             return 0;
         }
-        p->seq = 0;
+        memset(p->seq, 0, sizeof(p->seq));
         for (int k = 0; k < 4; k++)
             p->lba[k] = NONE;
         if (!PPN_ST_OK(st))
             continue;           /* unreadable page: nothing from it */
-        const uint8_t *m0 = pbuf + PPN_META_OFF;
-        p->seq = meta_seq(m0);
         for (int k = 0; k < 4; k++) {
             const uint8_t *m = pbuf + k * PPN_CHUNK + PPN_META_OFF;
             p->lba[k] = meta_lba(m);
-            if ((m[0] == 1 || m[0] == 2) && meta_seq(m) != p->seq + k && !seq_gaps++)
-                fprintf(stderr, "iosnand: die %d block %d page %d: chunk %d out of sequence\n",
-                        die, blk, pg, k);
+            memcpy(p->seq[k], m + 2, 6);
         }
     }
     b->written = PPN_PAGES;
@@ -272,9 +386,8 @@ static int scan(int verbose)
         if (rescanned)
             cache_save();       /* a first scan that is cut short resumes here */
     }
-    fprintf(stderr, "iosnand: %d blocks read again, %d unchanged, %d erased, %d retired, %.1f s%s\n",
-            rescanned, kept, erased, bad, (now_ms() - t0) / 1000.0,
-            seq_gaps ? " (chunks out of sequence inside a page: see above)" : "");
+    fprintf(stderr, "iosnand: %d blocks read again, %d unchanged, %d erased, %d retired, %.1f s\n",
+            rescanned, kept, erased, bad, (now_ms() - t0) / 1000.0);
     return rescanned;
 }
 
@@ -296,11 +409,12 @@ static void build_l2p(void)
                 struct page_rec *p = &pages[die][blk][pg];
                 for (int k = 0; k < 4; k++) {
                     uint32_t lba = p->lba[k];
-                    if (lba >= NLBA || p->seq + k <= best[lba])
+                    uint64_t seq = page_seq(p, k);
+                    if (lba >= NLBA || (l2p[lba] != NONE && seq <= best[lba]))
                         continue;
-                    if (!best[lba])
+                    if (l2p[lba] == NONE)
                         mapped++;
-                    best[lba] = p->seq + k;
+                    best[lba] = seq;
                     l2p[lba] = (((uint32_t)die * PPN_BLOCKS + blk) * PPN_PAGES + pg) * 4 + k;
                 }
             }
@@ -346,8 +460,10 @@ static int read_lba(uint32_t lba, uint8_t *out)
         d = pcache[slot].data;
     }
     const uint8_t *c = d + k * PPN_CHUNK;
-    if (meta_lba(c + PPN_META_OFF) != lba) {
-        /* the FTL moved it since the scan: s_verify_meta's "lba mismatch" */
+    int die = key / (PPN_BLOCKS * PPN_PAGES), blk = key / PPN_PAGES % PPN_BLOCKS, pg = key % PPN_PAGES;
+    if (meta_lba(c + PPN_META_OFF) != lba ||
+        meta_seq(c + PPN_META_OFF) != page_seq(&pages[die][blk][pg], k)) {
+        /* Same LBA with a different sequence also means this map is stale. */
         if (verify_fail++ < 10)
             fprintf(stderr, "iosnand: LBA %u moved since the scan (rescan with iosnand scan)\n", lba);
         return -1;
@@ -701,6 +817,14 @@ int main(int argc, char **argv)
         fprintf(stderr, "iosnand: out of memory\n");
         return 1;
     }
+    int loaded = cache_load();
+    if (loaded == -2) {
+        free(pages);
+        pages = NULL;
+        return 1;              /* no device open for a legacy/foreign path */
+    }
+    if (loaded)
+        fprintf(stderr, "iosnand: no v2 page cache yet: full scan (PIO previously ~15 minutes)\n");
     if (use_mtd) {
         if (mtd_backend_open()) {
             fprintf(stderr, "iosnand: read-only MTD backend unavailable or wrong geometry; no PIO fallback\n");
@@ -716,8 +840,6 @@ int main(int argc, char **argv)
             if (!ppn_claim(bus))
                 return 1;
     }
-    if (cache_load())
-        fprintf(stderr, "iosnand: no page cache yet: reading every page once, ~15 minutes\n");
     int changed = scan(1);
     if (changed < 0)
         return 1;

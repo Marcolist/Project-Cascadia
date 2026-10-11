@@ -197,11 +197,52 @@ sizes. The previous zero-initialized missing chunk could select physical
 chunk 0, i.e. the LwVM header, as partition contents. The previous chunk count
 could also exceed the fixed `phys[1024]` array. Both paths now fail closed.
 Partition/NBD request bounds use subtraction to avoid unsigned addition
-overflow. Cached block counts and 48-bit sequence records are validated before
+overflow. Cached block counts and 48-bit block-head sequences are validated before
 they are used as page-array bounds: a corrupt `written > 256` field previously
 allowed a walk past the cached block. CLI syntax and read ranges are now checked
 before `/dev/mem` is opened, so help, typos and invalid reads cannot initiate
 hardware scans. No NAND opcode, write/erase callback or MTD flag was enabled.
+
+### Exact chunk sequence ranking and cache v2
+
+The PPN metadata has **four separate u48 sequence fields per page**, one in
+bytes 2–7 of each 16-byte chunk metadata record. The previous C reader cached
+only chunk 0's value and ranked other chunks as `base + k`, merely warning when
+that guess disagreed with the actual bytes. A synthetic pair demonstrates the
+failure: page A has base 100 and chunk-3 sequence 900; page B has base 500 and
+chunk-3 sequence 700. The guess selected B (503 > 103), whereas the actual
+metadata selects A (900 > 700). The Python dump reader already uses exact values.
+Source evidence: [upstream measured metadata layout](https://github.com/rzxvx/Project-Cascadia/blob/a9bf28f20e5ce908fd5805e7d58b3ce9d9f0e4cf/docs/research/p105-nand.md#page-layout-and-the-ftls-metadata)
+and [upstream per-chunk dump scan](https://github.com/rzxvx/Project-Cascadia/blob/a9bf28f20e5ce908fd5805e7d58b3ce9d9f0e4cf/tools/nand-ftl-scan.py).
+
+`iosnand` now caches the four observed six-byte values verbatim, ranks each
+chunk by its exact value and verifies **both LBA and sequence** before returning
+read data. Sequence zero is valid: only `lba == NONE` / the missing map entry
+means unmapped. This removes the old first-sequence-zero omission as well.
+These changes improve recovery reads; they do not establish a complete FTL,
+TRIM handling, sequence rollover semantics, or an authoritative live snapshot
+while another OS/controller writer is active.
+
+The new default cache is `/var/lib/iosnand/pages.v2`, magic `IOSNAND2`. Its
+40-byte little-endian header declares die/block/page counts, record size, payload length and
+an IEEE CRC32 covering all block and page records. Exact file length, geometry,
+record bounds and checksum are checked before map construction. CRC32 detects
+accidental corruption; it is not authentication or proof of NAND freshness.
+A corrupt recognized v2 is discarded and rescanned. The old v1 omitted the
+individual values and cannot be converted reliably: it is retained untouched
+and a new scan creates v2 separately. An explicit `IOSNAND_CACHE` pointing at
+v1 or an unknown file is rejected **by header identity, before any backend is
+opened**. Symlinks, FIFOs, directories and unreadable existing paths are also
+rejected. Cache saves use private 0600 unique temporary files, flush/fsync and
+atomic rename; failed saves leave the previous cache intact and clean their
+own temporary. Publication checks reject a foreign existing destination too;
+cooperative tools take the bus locks, but this is not a hostile-path-race API.
+
+The page table grows from 26,148,864 to 43,581,440 bytes: **16.625 MiB additional
+RAM** on a 512 MiB iPad, plus the existing ~44.7 MiB transient best/L2P arrays
+when constructing the map. Caches remain ordinary host/Linux filesystem
+files; no NAND programming is added. ARM compilation and real-device memory
+headroom belong to their respective build/hardware validation steps.
 
 ### Explicit read-only MTD backend (`tools/nand/iosnand-mtd.h`)
 
@@ -256,11 +297,12 @@ main build report.
 ```sh
 python3 tests/test-nand-ftl-scan.py -v
 python3 tests/test-iosnand-parse.py
+python3 tests/test-iosnand-cache.py
 python3 tests/test-iosnand-mtd.py
 ```
 
-Results: 22 Python binary-fixture/CLI tests, 33 C production-parser/bounds
-cases and 25 fake-ioctl MTD layout/error/geometry cases pass (the last group
+Results: 22 Python binary-fixture/CLI tests, 36 C production-parser/bounds
+cases, 26 production v2-cache/exact-sequence cases and 25 fake-ioctl MTD layout/error/geometry cases pass (the last group
 runs with both modern and simulated pre-MEMREAD build headers). The C harnesses
 run with AddressSanitizer and UndefinedBehaviorSanitizer, do not link `ppn.c`,
 and abort if a test reaches any PPN open/claim/read/lock stub. The production

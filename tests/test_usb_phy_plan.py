@@ -45,6 +45,12 @@ class PhyPlanTests(unittest.TestCase):
         self.assertEqual(roles["USBDevice"]["usb_complex_control_bit0"], 1)
         self.assertEqual(roles["USBDeviceNeedsAuthentication"]["symbol_global"], "0x804daee8")
         self.assertFalse(roles["USBDevice"]["role_usable_or_vbus_verified"])
+        rails = result["accessory_rail_evidence"]["rails"]
+        self.assertEqual(rails[0]["voltage_maximum_firmware_units"], 3300)
+        self.assertEqual(rails[0]["enable_register"], "0x21")
+        self.assertEqual(rails[0]["enable_mask"], "0x4")
+        self.assertEqual(rails[1]["enable_register"], "0x26")
+        self.assertFalse(rails[0]["is_verified_5v_vbus_source"])
         delays = [step for step in result["observed_enable_host"] if step["operation"] == "delay_us"]
         self.assertEqual([step["value"] for step in delays], [20, 1000])
         for step in delays:

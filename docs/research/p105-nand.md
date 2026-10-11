@@ -201,14 +201,18 @@ mappings instead of 3, two pointing past the code signature).
 ## iosnand: iOS's partitions as Linux block devices
 
 `tools/nand/iosnand.c` (with `ppn.c`, the read-only PPN layer `nandctl` uses
-too) keeps a page table -- per page the sequence and the four LBAs, 26 MB,
-`/var/lib/iosnand/pages.v1` -- and serves LwVM partitions through the kernel's
+too) keeps a page table -- per page four exact u48 sequences and four LBAs,
+43.58 MB, `/var/lib/iosnand/pages.v2` -- and serves LwVM partitions through the kernel's
 NBD ioctls (a socketpair, no nbd-client).  First run: every page's metadata,
-714 s (2944 blocks with data, 1277 erased, 31 retired).  Later runs read page
+714 s (2944 blocks with data, 1277 erased, 31 retired) in the earlier upstream
+v1 measurement, not tested on our device. Later PIO runs read page
 0 of every block (a block the FTL erased and wrote again has a new sequence
 there) and the old write pointer of blocks that were still filling: 1.0 s when
-nothing changed.  Each read checks the LBA in the page's metadata, the way
-SFTL's `s_verify_meta` does.  Checked against the dump: LBA 0, System's first
+nothing changed in that earlier measurement. MTD mode scans every page. Each
+read now checks both the LBA and exact sequence in the page metadata. The new
+v2 cache has a payload CRC32 and retains v1 files without guessing the missing
+chunk values; see [current local storage research](p105-linux-storage.md).
+Earlier upstream checks against the dump: LBA 0, System's first
 16 MB and 8 MB at LBA 1000000 read back with the same MD5.  `ios mount` puts
 System on /mnt/ios through Linux's hfsplus.
 

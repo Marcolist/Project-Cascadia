@@ -129,6 +129,68 @@ Ignored local reports: `build/usb-host-research/tristar-xrefs.json`,
 `tristar-fields.txt`, `tristar-disasm.txt`. Heuristic xrefs were checked against
 the listed disassembly; the broader role state machine remains unresolved.
 
+## Accessory power and USB VBUS are separate questions
+
+The P105 dock's `acc_pwr` dispatch argument 5 is now decoded against the
+**same 12H321** PMU firmware, rather than an older LDO table. `_setLDO` at
+`0x80ece79c` uses 12-byte entries at `0x80ed2ec8`. Entry 5 is raw
+`c40932101f02340021000400`:
+
+| Field recovered from consumer | LDO index 5 value |
+|---|---|
+| Minimum / step / maximum code | 2500 / 50 / 16 |
+| Maximum in firmware voltage units | 3300 |
+| Voltage register / mask | `0x34` / `0x1f` |
+| Enable register / mask | `0x21` / `0x04` |
+| Optional shared register / mask | `0x7c` / `0x02` |
+
+These values are consistent with a 2.5–3.3 V accessory LDO, not a 5 V boost;
+voltage units and physical rail behavior are not measured here. The firmware
+LDO function at `0x80ecf4a0` reads the dispatch argument's index byte, options
+byte and voltage word before calling the setter. `acc_sleep_pwr` argument
+`0x216` resolves index 22 with options `0x02`: its table entry has enable
+register `0x26`, mask `0x04`, and no adjustable voltage fields. Neither is
+permission to write a live PMU register.
+
+The independent offline Unicorn experiment
+`scripts/emulate-usb-accessory-ldo.py` executes the actual `_setLDO` instructions
+with fake read/write callbacks and synthetic PMU RAM. It confirms normal
+index-5 enable/disable changes only register `0x21` mask `0x04`, index 22 uses
+`0x26` mask `0x04`, and options bit 0 selects the shared `0x7c` mask instead.
+A requested voltage of 3300 is accepted; 5000 returns `0xe00002c2` before any
+fake bus access. Read/write failures propagate and stop the operation. These
+are simulated digital transactions, not measured voltages or power safety.
+Output is `build/usb-host-research/ldo-emulation-v2.json`. Four firmware tests
+plus the parser/profile/planner suite total **20 passing USB tests** in the
+existing unprivileged, network-disabled build image. Native host Python runs
+16 tests and skips the four requiring its absent Unicorn dependency.
+
+The statement that the iPad must directly generate 5 V for an external USB
+bus is too narrow. Apple's public support documentation establishes that the
+**Lightning to USB 3 Camera Adapter** has its own Lightning power input, which
+can supply the iOS device and attached USB device. It also documents powered
+hubs and says this adapter needs iOS 9.3 or later.
+[Apple Support: USB-A camera adapters](https://support.apple.com/en-us/111811).
+This is a documented iOS product behavior; Cascadia accessory detection and
+power arbitration for that adapter are still unimplemented/unverified.
+
+Apple's public **Accessory Design Guidelines R31, 2026-09-21**, section 26
+(page 242), describes limited power drawn by Lightning accessories. Section
+36 (page 254) separately describes accessories providing power to a device
+and reporting an external source's capability.
+[Official Apple guidelines PDF](https://developer.apple.com/accessories/Accessory-Design-Guidelines.pdf).
+Local reference SHA256:
+`b631b8b25d6b4fba85f90dff494a7a7edc9996e357cbc97093aedc9d9bd6f2c9`.
+
+No primary teardown or schematic proving an internal boost converter in the
+original Lightning-to-USB Camera Adapter (MD821/A1440) was found in this
+research pass. Adapter-side conversion from the accessory rail is a hypothesis,
+not an established replacement for a missing VBUS design. The audited 8.4.1
+firmware also predates the documented 9.3 minimum for the powered USB 3 adapter;
+its later accessory policy cannot be assumed identical. We have not selected,
+purchased, connected or configured either adapter, and make no DIY wiring or
+backfeed recommendation.
+
 ## External controller routing: additional evidence, not a working route
 
 The official P105 ADT provides these additional topology facts:
@@ -280,9 +342,11 @@ approved for transfer.
    iBoot's device-mode PHY state and has no role-aware `set_mode` callback.
 3. **Lightning routing:** reconstruct Tristar/accessory identification and the
    `USBd` path. Forcing DWC2 host does not prove the adapter has routed D+/D−.
-4. **VBUS:** identify the real source switch/boost, over-current protection,
-   discharge and mutual exclusion with incoming power. Then model verified
-   hardware as a regulator linked through `vbus-supply`.
+4. **Power path:** determine the actual adapter architecture first: native
+   source/boost, adapter-side conversion, or externally powered adapter. Resolve
+   accessory supply, source budget, over-current protection, discharge and
+   mutual exclusion with incoming power. Only model verified hardware and its
+   true provider as a VBUS regulator; LDO 5 is not itself a 5 V VBUS supply.
 5. **Hardware tests, only after explicit authorization:** begin with independent
    serial/glass access and a low-power keyboard; then a hub and read-only flash
    media. Confirm USB topology, interrupts, timer operation and battery current.
