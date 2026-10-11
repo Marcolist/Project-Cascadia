@@ -62,7 +62,10 @@ static int mtd_geometry_ok(const struct mtd_info_user *info, uint64_t size)
     /* MEMGETINFO.size is only 32 bits!  Read the authoritative 64-bit size
      * from sysfs too; each fixed-geometry die is larger than 4 GiB. */
     return size == IOSNAND_MTD_SIZE && info->size == (uint32_t)size &&
-        info->type == MTD_NANDFLASH && !(info->flags & MTD_WRITEABLE) &&
+        /* Reject old SLC-mislabelled kernels and any SLC-emulated mapping:
+         * this backend expects the driver's exact 256-page MLC geometry. */
+        info->type == MTD_MLCNANDFLASH &&
+        !(info->flags & (MTD_WRITEABLE | MTD_SLC_ON_MLC_EMULATION)) &&
         info->writesize == IOSNAND_MTD_DATA &&
         info->erasesize == IOSNAND_MTD_ERASE && info->oobsize == IOSNAND_MTD_OOB;
 }

@@ -39,6 +39,7 @@ Charging evidence:
 Storage and USB evidence:
 
 - [Read-only Linux storage and NBD limits](p105-linux-storage.md)
+- [MLC media type and strict read-only compatibility](p105-mtd-media-type.md)
 - [Existing NAND architecture](p105-nand.md)
 - [USB host/PHY evidence](p105-usb-host.md)
 - [DWC2 versus Apple EHCI/OHCI controller boundaries](p105-usb-controller-boundaries.md)

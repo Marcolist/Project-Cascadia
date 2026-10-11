@@ -17,6 +17,7 @@
 static unsigned cursor, open_count, close_count;
 static int swapped, wrong_major, missing_dev, nonchar, writable, duplicate;
 static int staterror, ioctlerror, ioctlpositive, geometryerror, poisonclose;
+static unsigned reported_type, extra_flags;
 struct memory_cookie { char text[64]; size_t length, offset; };
 static unsigned stream; static struct memory_cookie cookies[32];
 static ssize_t memory_read(void *data, char *buffer, size_t length)
@@ -61,7 +62,7 @@ static int fake_fstat(int fd,struct stat *st)
 { assert(fd>=100&&fd<104);if(staterror){errno=EIO;return -1;}memset(st,0,sizeof(*st));st->st_mode=(nonchar?S_IFREG:S_IFCHR)|0600;unsigned index=fd-100;if(swapped&&index<2)index^=1;st->st_rdev=makedev(wrong_major?89:90,index*2);return 0; }
 static int fake_close(int fd){assert(fd>=100&&fd<104);close_count++;if(poisonclose)errno=EINTR;return 0;}
 static int fake_ioctl(int fd,unsigned long op,void *arg)
-{ assert(fd>=100&&fd<104&&op==MEMGETINFO);if(ioctlerror){errno=EACCES;return -1;}if(ioctlpositive)return 1;struct mtd_info_user *i=arg;memset(i,0,sizeof(*i));i->type=MTD_NANDFLASH;i->flags=MTD_NO_ERASE|(writable?MTD_WRITEABLE:0);i->size=(uint32_t)4462739456ull;i->erasesize=4194304;i->writesize=geometryerror?8192:16384;i->oobsize=64;return 0; }
+{ assert(fd>=100&&fd<104&&op==MEMGETINFO);if(ioctlerror){errno=EACCES;return -1;}if(ioctlpositive)return 1;struct mtd_info_user *i=arg;memset(i,0,sizeof(*i));i->type=reported_type;i->flags=MTD_NO_ERASE|(writable?MTD_WRITEABLE:0)|extra_flags;i->size=(uint32_t)4462739456ull;i->erasesize=4194304;i->writesize=geometryerror?8192:16384;i->oobsize=64;return 0; }
 static char *fake_fgets(char *text, int len, FILE *file)
 { if(streamreaderror){errno=EIO;return NULL;}return fgets(text,len,file); }
 static int fake_ferror(FILE *file) {return streamreaderror?1:ferror(file);}
@@ -85,6 +86,7 @@ static void reset(void)
     cursor=open_count=close_count=stream=0;
     swapped=wrong_major=missing_dev=nonchar=writable=duplicate=0;
     staterror=ioctlerror=ioctlpositive=geometryerror=poisonclose=0;
+    reported_type=MTD_MLCNANDFLASH;extra_flags=0;
     dev_text=size_text=NULL; inventory_count=4; streamreaderror=streamcloseerror=0;
     for(int i=0;i<PPN_DIES;i++)assert(mtd_fds[i]==-1);
 }
@@ -106,6 +108,9 @@ int main(void)
     reset();missing_dev=1;rejected(ENOENT);assert(!open_count);
     reset();nonchar=1;rejected(ENODEV);
     reset();writable=1;rejected(EINVAL);
+    reset();reported_type=MTD_NANDFLASH;rejected(EINVAL); /* Old SLC-mislabelled driver. */
+    reset();reported_type=MTD_NORFLASH;rejected(EINVAL);
+    reset();extra_flags=MTD_SLC_ON_MLC_EMULATION;rejected(EINVAL);
     reset();duplicate=1;rejected(EINVAL);
     const char *bad[]={"", "90", "90:", "90:-1\n", "-90:0\n", "90:+0\n", " 90:0\n", "90:0 junk\n",
                        "90:0:2\n", "90:18446744073709551616\n", "18446744073709551616:0\n", "91:0\n"};

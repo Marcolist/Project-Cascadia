@@ -141,7 +141,7 @@ int main(void)
     checks += 5;
 
     struct mtd_info_user info = {
-        .type = MTD_NANDFLASH, .flags = MTD_NO_ERASE,
+        .type = MTD_MLCNANDFLASH, .flags = MTD_NO_ERASE,
         .size = (uint32_t)IOSNAND_MTD_SIZE, .writesize = 16384,
         .erasesize = 4194304, .oobsize = 64,
     };
@@ -150,9 +150,18 @@ int main(void)
     info.flags |= MTD_WRITEABLE;
     assert(!mtd_geometry_ok(&info, IOSNAND_MTD_SIZE));
     info.flags &= ~MTD_WRITEABLE;
+    info.type = MTD_NANDFLASH;
+    assert(!mtd_geometry_ok(&info, IOSNAND_MTD_SIZE)); /* Legacy SLC label. */
+    info.type = MTD_NORFLASH;
+    assert(!mtd_geometry_ok(&info, IOSNAND_MTD_SIZE));
+    info.type = MTD_MLCNANDFLASH;
+    info.flags |= MTD_SLC_ON_MLC_EMULATION;
+    assert(!mtd_geometry_ok(&info, IOSNAND_MTD_SIZE));
+    info.flags &= ~MTD_SLC_ON_MLC_EMULATION;
+    assert(mtd_geometry_ok(&info, IOSNAND_MTD_SIZE));
     info.oobsize = 128;
     assert(!mtd_geometry_ok(&info, IOSNAND_MTD_SIZE));
-    checks += 4;
+    checks += 8;
     printf("iosnand-mtd: %u offline ioctl/layout/geometry cases passed\n", checks);
     return 0;
 }

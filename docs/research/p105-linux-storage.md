@@ -123,8 +123,13 @@ storage programming model different from arbitrary raw MLC pages.
 P105 advertises 256-page MLC and 128-page SLC blocks. That alone does not prove
 how to select SLC, what capacity is available, whether lower/upper pages are
 coupled, or whether interrupted programs damage previously acknowledged
-pages. The read-only driver currently labels generic NAND; that is not
-evidence of a safe writable SLC programming model. Internal ECC does not
+pages. The read-only driver now reports `MTD_MLCNANDFLASH` for its fixed
+256-page MLC mapping; it sets no SLC-emulation flag. The strict MTD backend
+rejects older kernels that mislabelled this mapping as SLC, as well as
+SLC-emulated or writable exports. Rebuild the matching kernel and tool
+together; there is no compatibility override or silent PIO fallback. See
+[MTD media-type evidence and compatibility](p105-mtd-media-type.md).
+Internal ECC does not
 establish power-cut atomicity. A future writable design must prove the PPN
 mode/order/failure guarantees before UBI, without merely bypassing this gate.
 
@@ -318,16 +323,17 @@ to another node or fallback to PIO. Existing geometry/type/read-only checks
 remain required. This binds discovery to the actual node, without claiming
 a lease against subsequent privileged kernel/device reconfiguration.
 
-`tests/test-iosnand-mtd-open.py` exercises **31 production discovery/binding
+`tests/test-iosnand-mtd-open.py` exercises **34 production discovery/binding
 cases twice**, under modern and simulated pre-MEMREAD headers, with strict fake
 directory/node/stat/ioctl calls and in-process memory streams for sysfs text.
 Correct four-die mapping succeeds; swapped minors, wrong major, noncharacter
-nodes, writable flags, duplicate names and missing/malformed/overflowing dev
-attributes fail and close every opened fake FD. Character/rdev mismatch reports
+nodes, writable/SLC-emulated flags, legacy SLC/NOR types, duplicate names and
+missing/malformed/overflowing dev attributes fail and close every opened fake
+FD. Character/rdev mismatch reports
 ENODEV, invalid geometry/text EINVAL, and actual stat/ioctl/read/close errors
 survive cleanup instead of misleading "Success" diagnostics. Missing dies,
 malformed size text and truncated attributes are also covered. No sysfs/device file or real
-ioctl is used. The existing 25 layout/error tests still pass under both headers.
+ioctl is used. The 29 layout/error/geometry cases pass under both headers.
 
 The read-only boundary is software-defined: the H2FMI driver sets only
 MTD_NO_ERASE, has no MTD_WRITEABLE flag, and registers read_oob/block_isbad,

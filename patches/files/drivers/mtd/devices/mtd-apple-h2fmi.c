@@ -576,7 +576,9 @@ static int h2fmi_setup_mtd(struct h2fmi *fmi, int idx)
 	if (!mtd->name)
 		return -ENOMEM;
 
-	mtd->type = MTD_NANDFLASH;
+	/* The fixed row mapping exposes 256-page MLC blocks.  PPN-managed ECC
+	 * does not make them SLC or establish SLC programming guarantees. */
+	mtd->type = MTD_MLCNANDFLASH;
 	/* No MTD_WRITEABLE on purpose: this driver cannot write, and the NAND
 	 * it is pointed at holds somebody's iOS.  MTD_NO_ERASE goes with it --
 	 * add_mtd_device() rejects an erasesize with no ->_erase behind it
