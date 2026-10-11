@@ -17,8 +17,8 @@ test. The normal boot procedure remains [QUICKSTART](../QUICKSTART.md).
 | Area | Implemented and tested offline | Still unresolved |
 | --- | --- | --- |
 | Battery/PMU | Atomic HDQ cache, valid percentage range, break failure handling, discharge status, GPIO errors, removal of event-consuming probe dump | Complete charger initialization, battery/fault protection, voltage/termination policy and hardware verification |
-| NAND | Read progress/ECC errors, explicit read-only MEMREAD backend with exact sysfs/device identity, strict metadata/cache checks, reduced mapper memory, NBD bounds/setup/worker cleanup, pidfd control and generation-bound System readiness | Actual process/sysfs hardware integration, target capacity/performance, writable PPN/FTL and Linux-owned storage |
-| USB | Host-only build/link, bounded ADT parser, PHY power-error handling, two-bit GPIO selector masks, isolated HID/storage profile | Hardware verification of the new reference-recovery path, complete connector routing, external 5 V VBUS/protection, role transitions and real peripherals |
+| NAND | Read progress/ECC errors, PIO completion/tail-copy errors, failed-payload publication gates, explicit read-only MEMREAD backend with exact sysfs/device identity, strict metadata/cache checks, reduced mapper memory, NBD bounds/setup/worker cleanup, pidfd control and generation-bound System readiness | Actual process/sysfs hardware integration, target capacity/performance, writable PPN/FTL and Linux-owned storage |
+| USB | Host-only build/link, bounded ADT parser, PHY power-error handling, two-bit GPIO selector masks, explicit input/IRQ peripheral-mode exit, isolated HID/storage profile | Hardware verification of the new reference-recovery path, complete connector routing, external 5 V VBUS/protection, role transitions and real peripherals |
 
 Charging evidence:
 
@@ -34,6 +34,8 @@ Charging evidence:
 - [Concrete charger guard-field owners](p105-charge-guard-ownership.md)
 - [System watchdog and charger protection distinction](p105-pmu-watchdog.md)
 - [ADC identities and scaling with acquisition blocked](p105-d1946-adc.md)
+- [ADC-to-owner voltage software units and compensation](p105-voltage-unit-chain.md)
+- [Boot PMU readback errors and bounded initialization coverage](p105-boot-pmu-init-boundaries.md)
 - [ADC completion, IRQ and quiesce with fake I/O](p105-d1946-adc-lifecycle.md)
 - [ARM clock interval conversion with fake frequency and time](p105-clock-intervals.md)
 - [USB gadget budget integration gap](p105-usb-charge-budget.md)
@@ -45,6 +47,9 @@ Storage and USB evidence:
 - [MLC media type and strict read-only compatibility](p105-mtd-media-type.md)
 - [PPN error-list fields and unresolved AP/IOP ownership](p105-ppn-error-list-evidence.md)
 - [PPN translation/cache/completion and panic boundaries](p105-ppn-completion-boundaries.md)
+- [PIO read-end errors and cache publication](p105-ppn-read-end-errors.md)
+- [PIO partial-tail copy and exact delivered bytes](p105-ppn-data-out.md)
+- [NANDctl failed-read output and file-preservation gates](p105-nandctl-read-failures.md)
 - [Strict synthetic error-list decoder and independent oracle](p105-ppn-synthetic-decoder.md)
 - [Normalized multi-list observations and unknown absence](p105-ppn-normalized-observations.md)
 - [Existing NAND architecture](p105-nand.md)
@@ -61,6 +66,8 @@ Storage and USB evidence:
 - [Accessory rail callbacks and ID-derived voltage](p105-accessory-power.md)
 - [Accessory switch GPIO descriptor and simulated provider](p105-accessory-gpio.md)
 - [SoC GPIO mux-mask comparison and remaining policy differences](p105-soc-gpio-masks.md)
+- [GPIO input/IRQ lifecycle and peripheral-mode exit](p105-gpio-input-lifecycle.md)
+- [DWC2 platform/HCD shared-PHY lifecycle and scope](p105-dwc2-phy-lifecycle.md)
 - [VBUS presence sensing and the missing 5 V provider](p105-vbus-presence.md)
 
 Run `python3 scripts/test-offline.py` from the repository root. It runs all
