@@ -25,6 +25,7 @@ Charging evidence:
 - [D1946 current and battery policy](p105-charging.md)
 - [PMU Wake/Sleep/Quiesce](p105-pmu-lifecycle.md)
 - [Source-event notifications](p105-source-events.md)
+- [Input-current backoff, stored cap and deadline](p105-source-backoff.md)
 - [USB gadget budget integration gap](p105-usb-charge-budget.md)
 - [Host current-offset request receiver](p105-usb-current-request.md)
 
