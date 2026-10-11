@@ -1,6 +1,15 @@
-# P105 power, storage and USB research
+# Research notes
 
-This directory records offline work on iPad2,5 / p105ap. It separates driver
+Working notes from the bring-up, kept verbatim rather than tidied — the failed
+attempts are the useful part.
+
+Several of these originate from **teutekeune/iBSSloader** and were extended
+during Cascadia work (notably `p105-smp-bringup.md`, which carries the lab
+results of ~20 failed attempts at waking cpu1). Both projects are GPL-2.0.
+
+## P105 power, storage and USB research
+
+The following additional notes record offline work on iPad2,5 / p105ap. They separate driver
 fixes, experimental build profiles and firmware evidence. Nothing here is
 evidence of a successful physical charging, external USB-host or writable NAND
 test. The normal boot procedure remains [QUICKSTART](../QUICKSTART.md).
