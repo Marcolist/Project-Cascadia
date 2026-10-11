@@ -28,10 +28,12 @@
  *       tools/nand/iosnand.c tools/nand/ppn.c
  */
 #include <arpa/inet.h>
+#include <dirent.h>
 #include <endian.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/nbd.h>
+#include <limits.h>
 #include <poll.h>
 #include <signal.h>
 #include <stdint.h>
@@ -634,44 +636,198 @@ struct export {
     struct part *p;
     int nbd, sock;
     pid_t child;
+    int owned;                 /* our SET_SOCK succeeded; not a lasting lease */
+    int started;               /* a DO_IT child may have run: no reset ioctl */
     char dev[24];
 };
 
+/* A DO_IT worker needs only its control fd and the parent's log. Do not
+ * retain other exports' socket peers or PPN/MTD descriptors and bus locks. */
+static int child_close_fds(int keep)
+{
+    DIR *d = opendir("/proc/self/fd");
+    if (!d)
+        return -1;
+    int enumeration_fd = dirfd(d), ret = 0;
+    if (enumeration_fd < 0) {
+        int saved = errno;
+        closedir(d);
+        errno = saved;
+        return -1;
+    }
+    for (;;) {
+        errno = 0;
+        struct dirent *entry = readdir(d);
+        if (!entry) {
+            if (errno)
+                ret = -1;
+            break;
+        }
+        if (!entry->d_name[0] ||
+            strspn(entry->d_name, "0123456789") != strlen(entry->d_name))
+            continue;
+        char *end;
+        long fd = strtol(entry->d_name, &end, 10);
+        if (errno || *end || fd < 0 || fd > INT_MAX) {
+            ret = -1;
+            break;
+        }
+        if (fd != keep && fd != STDERR_FILENO && fd != enumeration_fd && close(fd)) {
+            ret = -1;
+            break;
+        }
+    }
+    int saved = errno;
+    if (closedir(d))
+        ret = -1;
+    else
+        errno = saved;
+    return ret;
+}
+
+static int cleanup_exports(struct export *ex, int n)
+{
+    int failed = 0;
+    /* Drop all peers first: kernel receive workers can then exit even if
+     * several exports started. Never wait while retaining another peer. */
+    for (int i = 0; i < n; i++)
+        if (ex[i].sock >= 0) {
+            if (close(ex[i].sock)) {
+                perror("close NBD peer");
+                failed = 1;
+            }
+            ex[i].sock = -1;
+        }
+    for (int i = 0; i < n; i++) {
+        if (ex[i].child > 0) {
+            int status;
+            pid_t r;
+            do { r = waitpid(ex[i].child, &status, 0); } while (r < 0 && errno == EINTR);
+            if (r < 0) {
+                perror("wait NBD worker");
+                failed = 1;
+            } else if (!WIFEXITED(status) || WEXITSTATUS(status)) {
+                fprintf(stderr, "iosnand: %s worker failed\n", ex[i].dev);
+                failed = 1;
+            }
+            ex[i].child = 0;
+        }
+        /* Before any DO_IT child exists, unwind our own SET_SOCK. Once a
+         * child could have run, release only our descriptors: a global
+         * CLEAR/DISCONNECT is not tied to this socket generation and could
+         * affect another client. Final kernel config refs clean up normally. */
+        if (ex[i].owned && !ex[i].started) {
+            if (ioctl(ex[i].nbd, NBD_CLEAR_SOCK)) {
+                perror("clear owned NBD socket");
+                failed = 1;
+            }
+        }
+        ex[i].owned = 0;
+        if (ex[i].nbd >= 0) {
+            if (close(ex[i].nbd)) {
+                perror("close NBD control");
+                failed = 1;
+            }
+            ex[i].nbd = -1;
+        }
+    }
+    return failed;
+}
+
+/* A failed DO_IT/descriptor setup need not close the kernel's socket ref.
+ * Detect our worker's exit explicitly instead of waiting forever for HUP. */
+static int check_workers(struct export *ex, int n)
+{
+    int failed = 0;
+    for (int i = 0; i < n; i++) {
+        if (ex[i].child <= 0)
+            continue;
+        int status;
+        pid_t r = waitpid(ex[i].child, &status, WNOHANG);
+        if (!r || (r < 0 && errno == EINTR))
+            continue;
+        ex[i].child = 0;       /* reaped, or no longer waitable: never wait any */
+        if (r < 0) {
+            perror("check NBD worker");
+            failed = 1;
+        } else if (!WIFEXITED(status) || WEXITSTATUS(status) || ex[i].sock >= 0) {
+            fprintf(stderr, "iosnand: %s worker stopped before server cleanup\n", ex[i].dev);
+            failed = 1;
+        }
+    }
+    return failed;
+}
+
 static int attach(struct export *e, int idx)
 {
-    int sv[2];
+    int sv[2] = { -1, -1 };
+    e->nbd = e->sock = -1;
+    e->child = 0;
+    e->owned = 0;
+    e->started = 0;
     snprintf(e->dev, sizeof(e->dev), "/dev/nbd%d", idx);
-    e->nbd = open(e->dev, O_RDWR);
+    e->nbd = open(e->dev, O_RDWR | O_CLOEXEC);
     if (e->nbd < 0) {
         perror(e->dev);
         return -1;
     }
     if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv)) {
         perror("socketpair");
-        return -1;
+        goto fail;
     }
-    ioctl(e->nbd, NBD_CLEAR_SOCK);
+    e->sock = sv[1];
+    /* SET_SOCK atomically checks the v6.12 kernel's setup-task/Netlink owner.
+     * Do not reset or change geometry/flags on an export owned by others. */
+    if (ioctl(e->nbd, NBD_SET_SOCK, (unsigned long)sv[0])) {
+        perror("claim NBD socket");
+        goto fail;
+    }
+    e->owned = 1;
     if (ioctl(e->nbd, NBD_SET_BLKSIZE, 4096UL) ||
         ioctl(e->nbd, NBD_SET_SIZE_BLOCKS, (unsigned long)(e->p->size / 4096)) ||
-        ioctl(e->nbd, NBD_SET_FLAGS, (unsigned long)(NBD_FLAG_HAS_FLAGS | NBD_FLAG_READ_ONLY)) ||
-        ioctl(e->nbd, NBD_SET_SOCK, sv[0])) {
+        ioctl(e->nbd, NBD_SET_FLAGS, (unsigned long)(NBD_FLAG_HAS_FLAGS | NBD_FLAG_READ_ONLY))) {
         perror("nbd ioctl");
-        return -1;
+        goto fail;
     }
     e->child = fork();
+    if (e->child < 0) {
+        perror("fork NBD worker");
+        goto fail;
+    }
     if (e->child == 0) {
         /* NBD_DO_IT runs the device until it is disconnected */
-        close(sv[1]);
-        ioctl(e->nbd, NBD_DO_IT);
-        ioctl(e->nbd, NBD_CLEAR_QUE);
-        ioctl(e->nbd, NBD_CLEAR_SOCK);
-        _exit(0);
+        if (child_close_fds(e->nbd)) {
+            perror("NBD worker descriptors");
+            _exit(1);
+        }
+        int ret = ioctl(e->nbd, NBD_DO_IT);
+        if (ret)
+            perror("NBD_DO_IT");
+        if (close(e->nbd)) {
+            perror("close NBD worker control");
+            ret = -1;
+        }
+        _exit(ret ? 1 : 0);
     }
-    close(sv[0]);
+    e->started = 1;
+    int closed = close(sv[0]);
+    sv[0] = -1;               /* Linux close releases fd even on error; no retry */
+    if (closed) {
+        perror("close NBD setup socket");
+        goto fail;
+    }
     e->sock = sv[1];
     fprintf(stderr, "iosnand: %s = %s, %llu MB, read-only\n", e->dev, e->p->name,
             (unsigned long long)(e->p->size >> 20));
     return 0;
+fail: {
+        int saved = errno;
+        if (sv[0] >= 0 && close(sv[0]))
+            perror("close failed NBD setup socket");
+        cleanup_exports(e, 1);
+        errno = saved;
+        return -1;
+    }
 }
 
 /* one request; -1 when the device went away */
@@ -726,7 +882,7 @@ static int serve(char **names, int n)
 {
     static char *deflt[] = { "System" };
     struct export ex[12];
-    int nex = 0;
+    int nex = 0, failed = 0;
     if (!n) {
         names = deflt;
         n = 1;
@@ -738,8 +894,10 @@ static int serve(char **names, int n)
             continue;
         }
         ex[nex].p = p;
-        if (attach(&ex[nex], nex))
+        if (attach(&ex[nex], nex)) {
+            cleanup_exports(ex, nex);
             return 1;
+        }
         nex++;
     }
     if (!nex)
@@ -751,7 +909,17 @@ static int serve(char **names, int n)
     while (!stop) {
         for (int i = 0; i < nex; i++)
             pf[i] = (struct pollfd){ ex[i].sock, POLLIN, 0 };
-        if (poll(pf, nex, 1000) < 0)
+        int ready = poll(pf, nex, 1000);
+        if (ready < 0 && errno != EINTR) {
+            perror("poll NBD peers");
+            failed = 1;
+            break;
+        }
+        if (check_workers(ex, nex)) {
+            failed = 1;
+            break;
+        }
+        if (ready < 0)
             continue;
         for (int i = 0; i < nex; i++)
             if (pf[i].revents && ex[i].sock >= 0 && serve_one(&ex[i])) {
@@ -764,14 +932,9 @@ static int serve(char **names, int n)
         if (!alive)
             break;
     }
-    for (int i = 0; i < nex; i++) {
-        ioctl(ex[i].nbd, NBD_DISCONNECT);
-        if (ex[i].sock >= 0)
-            close(ex[i].sock);
-        waitpid(ex[i].child, NULL, 0);
-    }
+    failed |= cleanup_exports(ex, nex);
     fprintf(stderr, "iosnand: stopped\n");
-    return 0;
+    return failed;
 }
 
 /* ---- main ---------------------------------------------------------------- */

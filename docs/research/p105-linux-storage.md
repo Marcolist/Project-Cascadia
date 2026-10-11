@@ -450,6 +450,71 @@ fixtures use unmapped zero-filled LBAs; any PPN or MTD operation aborts the
 test. Only process-local Unix sockets are opened, without kernel NBD attach,
 real ioctl, device access or writable storage.
 
+### NBD setup ownership, worker lifetime and failure cleanup
+
+The earlier `attach` path reset `/dev/nbdN` unconditionally before configuring
+it, leaked setup descriptors on socket/ioctl failures and treated a failed
+`fork()` as success. That negative child PID could reach `waitpid(-1)` later.
+A failure starting a second export did not unwind the first explicitly, and
+later DO_IT workers inherited older export peers and NAND descriptors/locks.
+Seven baseline cases reproduced these failures with every relevant API faked.
+
+Setup now issues **SET_SOCK before geometry or flags**, without an initial
+CLEAR. The pinned kernel's
+[`nbd_add_socket`](https://github.com/torvalds/linux/blob/adc218676eef25575469234709c2d87185ca223a/drivers/block/nbd.c#L1169)
+checks the legacy setup task and Netlink-bound state in that operation.
+This avoids the previous destructive reset of an already owned export; it
+does not create a permanent ownership lease against concurrent privileged
+device-control clients. A failed SET_SOCK closes only this process's FDs.
+Before any DO_IT child could run, setup failures can unwind this process's
+successful SET_SOCK with CLEAR. Once a positive child exists, cleanup uses
+**only this process's socket/control descriptors and targeted child waits**,
+without global CLEAR or DISCONNECT ioctls. In ordinary isolated operation,
+final kernel configuration references release their resources.
+
+The common unwind closes every server peer before waiting for positive own
+child PIDs, retries interrupted waits and reports child exit, wait and close
+failures. Partial multi-export startup uses it too. Linux close errors are
+reported without retrying a descriptor that may already have been released.
+An early failed worker need not release the kernel socket reference, so the
+serve loop also monitors own children with WNOHANG instead of depending solely
+on socket HUP. Early exit or fatal poll failure aborts and unwinds the session.
+
+Each DO_IT child enumerates `/proc/self/fd` and closes every inherited
+descriptor except its own NBD control fd and stderr: previous export peers,
+NAND descriptors and their inherited lock references do not remain alive.
+Enumeration/close/DO_IT failures produce a nonzero exit, with diagnostics in
+the existing log. The child does not reset the device on exit. `dirent.h` and
+`limits.h` are explicit source dependencies; no extra package is installed.
+The target initramfs already mounts procfs; missing/unreadable procfs aborts
+that worker rather than falling back to retaining unknown descriptors.
+
+Kernel review limits are explicit. In this v6.12 source, `nbd_bdev_reset` only
+adjusts capacity; `task_setup=NULL` occurs in `nbd_clear_sock` and the Netlink
+disconnect path. Parent FDs/local flags are therefore not claimed as universal
+generation tokens. No automatic reset of stale or foreign devices is added.
+Concurrent privileged external reconfiguration, stale sysfs capacity after
+abnormal teardown, the existing startup signal-handler window and a truly
+wedged kernel wait still require hardware/process integration assessment.
+There is no automatic signal escalation or timeout-based device reset.
+
+The actual production functions pass **36 ASan/UBSan fake-API cases** covering
+all SET failures, foreign EBUSY, failed fork, setup-close failures, complete
+and partial startup unwind, positive-only waits, EINTR, child/cleanup errors,
+worker exit/poll detection, post-running foreign takeover without reset and
+post-fork FD removal. `open`, socketpair, ioctl, fork, exit, wait, signal,
+poll (including fortified `__poll_chk`) and directory APIs are intercepted;
+unreachable request read/write or unexpected kill abort. No real process fork,
+device access, kernel NBD attachment or signal is used. These fixtures test
+userspace control flow; they do not emulate every kernel configuration-ref
+or hardware behavior.
+
+The shell wrapper's separate unchecked/stale-PID issue remains outside this
+change. Four isolated baseline fixtures with fake kill demonstrate that PID
+existence alone does not identify `iosnand`. Numeric/starttime shell checks
+would still leave a check-to-signal race; a pidfd-based design is a separate
+review item. No real process was signaled in that research.
+
 ## Validation and limits
 
 ```sh
@@ -459,6 +524,7 @@ python3 tests/test-iosnand-cache.py
 python3 tests/test-iosnand-mtd.py
 python3 tests/test-h2fmi-read.py
 python3 tests/test-iosnand-nbd.py
+python3 tests/test-iosnand-lifecycle.py
 ```
 
 Results: 22 Python binary-fixture/CLI tests, 36 C production-parser/bounds
@@ -467,7 +533,7 @@ runs with both modern and simulated pre-MEMREAD build headers). In addition,
 21 actual H2FMI/MEMREAD/adapter integration cases pass. This harness imports
 only the exact local v6.12 MTD UAPI header and production functions, so old
 system headers are not replaced. Another 25 actual NBD socketpair cases
-pass. The C harnesses
+and 36 production lifecycle/fake-API cases pass. The C harnesses
 run with AddressSanitizer and UndefinedBehaviorSanitizer, do not link `ppn.c`,
 and abort if a test reaches any PPN open/claim/read/lock stub. The production
 `scan_block` test finds a valid page after an all-FF page and reads all 256 pages.
