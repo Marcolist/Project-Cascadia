@@ -73,7 +73,7 @@ static unsigned exits, inits;
 static int usb_phy_roothub_init(struct usb_phy_roothub *p) { (void)p; inits++; return 0; }
 static int usb_phy_roothub_exit(struct usb_phy_roothub *p) { (void)p; exits++; return 0; }
 '''
-    root_bytes = ROOT_HUB.read_bytes()
+    root_bytes = LIFECYCLE.baseline_source('drivers/usb/core/phy.c', ROOT_HUB_SHA256)
     if hashlib.sha256(root_bytes).hexdigest() != ROOT_HUB_SHA256:
         raise ValueError('requires the pinned unmodified Linux USB PHY consumer')
     root_source = root_bytes.decode()

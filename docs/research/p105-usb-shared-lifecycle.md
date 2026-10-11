@@ -1,5 +1,7 @@
 # P105 shared USB PHY lifecycle: consumers and failure limits
 
+Historical diagnostic control: the subsequent [PHY reference-recovery patch](p105-usb-phy-reference-recovery.md) addresses the counted software path. These tests deliberately retain exact pinned original-source controls; their observed old failure is not a claim that the patched candidate still follows that path. Baseline bytes are read from a pristine tree or the verified local pinned Git object, never by undoing production edits.
+
 Research date: 2026-10-11. Runtime review baseline: local `a812775`.
 The runtime driver remains unchanged by this evidence group. Tests use actual
 C functions with fake regulators, ordinary RAM, runtime-PM counters and mutex

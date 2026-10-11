@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Diagnose real Linux PHY refcounts with real S5L callbacks, offline.
 
-This records an unresolved error path; passing does not claim it is fixed.
+This records the original core error path against exact baseline source.
+Passing this historical control does not describe the separately patched core.
 Set CASCADIA_LINUX_SOURCE to a local pinned Linux 6.12 tree if build/linux is
 absent. No dependency download, hardware access or production source edit.
 """
@@ -20,6 +21,27 @@ CORE = LINUX / 'drivers/phy/phy-core.c'
 PINNED_CORE_SHA256 = '259e56ec9a9064cd120ab6f46e1457a5d78e089d56dbf989a0bb51297fe143f8'
 
 
+
+LINUX_COMMIT = 'adc218676eef25575469234709c2d87185ca223a'
+
+
+def baseline_source(relative, expected_hash):
+    """Read exact baseline bytes from a pristine tree or its local pinned Git object.
+
+    Candidate tests read separately applied patch output. This function never
+    downloads sources or reverses edits in the user's kernel tree.
+    """
+    data = (LINUX / relative).read_bytes()
+    if hashlib.sha256(data).hexdigest() == expected_hash:
+        return data
+    result = subprocess.run(['git', '-c', 'protocol.allow=never', '-C', str(LINUX), 'show',
+                             LINUX_COMMIT + ':' + relative],
+                            capture_output=True, check=False)
+    if result.returncode or hashlib.sha256(result.stdout).hexdigest() != expected_hash:
+        raise ValueError('requires exact pinned Linux 6.12 baseline: ' + relative)
+    return result.stdout
+
+
 def extract(text, declaration):
     start = text.index(declaration + '(')
     brace = text.index('{', start)
@@ -31,7 +53,7 @@ def extract(text, declaration):
 
 
 def source_harness(off_policy='current'):
-    core_bytes = CORE.read_bytes()
+    core_bytes = baseline_source('drivers/phy/phy-core.c', PINNED_CORE_SHA256)
     if hashlib.sha256(core_bytes).hexdigest() != PINNED_CORE_SHA256:
         raise ValueError('requires the unmodified pinned Linux 6.12 phy-core.c')
     driver = (ROOT / 'patches/files/drivers/phy/phy-apple-s5l-usb.c').read_text()
@@ -99,21 +121,16 @@ static void phy_pm_runtime_put(struct phy *p) { phy_pm_runtime_put_sync(p); }
         's5l_supply_disable', 's5l_hostphy_power_on'))
     off = extract(driver, 'static int s5l_hostphy_power_off')
     if off_policy == 'historical':
-        # Exact baseline callback from a9bf28f20e5ce908fd5805e7d58b3ce9d9f0e4cf.
-        # This temporary control is never installed in production source.
-        off = '''static int s5l_hostphy_power_off(struct phy *phy)
-{
- struct s5l_usbphy *p = phy_get_drvdata(phy);
- if (p->hsic_supply_on) {
-  regulator_disable(p->hsic_supply);
-  p->hsic_supply_on = false;
- }
- if (p->lpo_supply_on) {
-  regulator_disable(p->lpo_supply);
-  p->lpo_supply_on = false;
- }
- return 0;
-}'''
+        # Compile the exact archived callback; do not maintain a handwritten
+        # historical implementation alongside the actual production source.
+        repository = (ROOT / 'patches/files/drivers/phy/phy-apple-s5l-usb.c').resolve().parents[4]
+        result = subprocess.run(['git', '-c', 'protocol.allow=never', '-C', str(repository), 'show',
+            'a9bf28f20e5ce908fd5805e7d58b3ce9d9f0e4cf:patches/files/drivers/phy/phy-apple-s5l-usb.c'],
+            capture_output=True, check=False)
+        expected = '116636c6d8cf4cec10a7b9f02154e9084a77894e254e11204f2a7c25a01718f1'
+        if result.returncode or hashlib.sha256(result.stdout).hexdigest() != expected:
+            raise ValueError('requires exact archived Cascadia PHY baseline')
+        off = extract(result.stdout.decode(), 'static int s5l_hostphy_power_off')
     elif off_policy == 'hidden_error_control':
         checked = 'return ret ? ret : lpo_ret;'
         if checked not in off:

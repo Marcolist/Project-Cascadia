@@ -1,5 +1,7 @@
 # Temporary S5L power-off transaction: insufficient without consumer handling
 
+Historical diagnostic control: the subsequent [PHY reference-recovery patch](p105-usb-phy-reference-recovery.md) addresses the counted software path. These tests deliberately retain exact pinned original-source controls; their observed old failure is not a claim that the patched candidate still follows that path. Baseline bytes are read from a pristine tree or the verified local pinned Git object, never by undoing production edits.
+
 Research date: 2026-10-11. This experiment supplements the
 [shared lifecycle diagnosis](p105-usb-shared-lifecycle.md). It does not alter
 the runtime PHY driver. The candidate callback is compiled only in temporary
