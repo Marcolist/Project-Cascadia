@@ -186,6 +186,50 @@ This reference-counted clock path and the cable-change USB20 reset path are
 not yet reproduced completely in Linux. The existing driver enabling EHCI
 and OHCI0 gates is a subset, rather than a firmware-equivalent role switch.
 
+
+## Port power callback: controller request, not a proven 5 V source
+
+The removable-port factory at `0x80c90ad4` stores actual instance vptr
+**`0x80c92608`**; PIC pair `0x80c90af4/0x80c90af6` plus 8 resolves it.
+The inherited IOUSBFamily `setPowerStateGated` implementation at `0x8082b4f8`
+dispatches the direct off→on transition (requested state 2, current state 0)
+to instance slot `+0x384`, target **`0x808487f8`**. It performs two register
+updates through the actual instance register helpers:
+
+| Step | Actual firmware instruction range | Synthetic effect |
+|---|---|---|
+| Read without RW1C acknowledgment | `+0x3d8` → `0x808497a0` | Read mapped pointer `object+0xd8`, clear write-one-to-clear mask `0x2a` from the value to write back |
+| Power request | `0x8084884e..0x80848862` | OR `0x1000`, EHCI `PORT_POWER` |
+| Wake policy | `0x80848864..0x80848878` | OR `0x300000`, wake on connect/disconnect |
+| Actual write | `+0x3dc` → `0x808497ac` | Store to the mapped PORTSC pointer, then `OSSynchronizeIO` |
+
+The mapped pointer is retained by `0x80847b6c` at `0x80847bec`; controller
+port creation at `0x80c9065a..0x80c90668` constructs its 4-byte mapping from
+operational register base plus `0x44 + 4*(port-1)`. This confirms PORTSC access,
+not an arbitrary PMU register. `PORT_POWER` is a real controller power request;
+its physical connection to a P105 switch/boost or adapter still needs proof.
+No PMU or Tristar power API occurs directly inside this inspected on callback.
+That observation cannot rule out separate accessory-manager or PHY power paths.
+
+`scripts/emulate-ehci-port-power.py` executes the actual gated dispatch,
+actual port power callback and actual read/write helpers against fake RAM.
+It requires the exact cache hash and verifies the instance vtable slots.
+Only external `_IOSleep` and `_OSSynchronizeIO` imports are intercepted:
+stubs `0x8084ab7c/0x8084ab9c` resolve imports `0x8084d01c/0x8084d024` to actual
+kernel symbols `0x802e4658/0x800b24c4`. Off→on uses no sleep. The inspected
+on→off callback does two writes separated by `IOSleep(1)` (one millisecond).
+
+Four regression tests in `tests/test_ehci_port_power.py` pass in the existing
+network-disabled build image: on requests, preservation of unrelated fields,
+off sequence and rejection of unpinned firmware/unreviewed transitions.
+For example initial synthetic `PORTSC=0x2b` produces writes `0x1001` and
+`0x301001`, keeping the connection bit while avoiding accidental RW1C acks.
+The emulator's PORTSC is ordinary RAM: it does not model hardware W1C behavior,
+external voltage, IOKit asynchronous completion, PHY power, or USB enumeration.
+Its result explicitly reports `vbussource_or_voltage_verified: false`.
+Pinned [EHCI register definitions](https://github.com/torvalds/linux/blob/adc218676eef25575469234709c2d87185ca223a/include/linux/usb/ehci_def.h)
+corroborate the standard power/wake bit meanings.
+
 ## Concrete Linux gaps and consequences
 
 | Item | Current Cascadia implementation | Evidence / remaining work |

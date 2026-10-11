@@ -356,8 +356,10 @@ and filesystem page cache. Serving does not release the page or L2P tables.
 The NBD workers fork after mapping: these immutable tables are initially
 shared through copy-on-write, so summing each worker's RSS overcounts physical
 memory. Worker page tables/private changes and filesystem read caching still
-add memory. The existing oversized-NBD-request allocation path also makes
-an arbitrary userspace request a poor substitute for measured kernel I/O.
+add memory. Valid NBD reads larger than the 1 MiB static buffer still allocate
+their payload. The pinned kernel's NBD queue advertises up to 65,536 sectors
+(32 MiB), so even normal I/O can add a sizable transient buffer; no new
+artificial request-size limit is introduced.
 
 MTD adds two kernel bus raw buffers totaling 32,896 bytes. An aligned MEMREAD
 also has 16,448 bytes of kernel data/OOB bounce storage; the userspace adapter
@@ -427,6 +429,27 @@ keep Linux state without NAND writes. The separate writable PPN/FTL design
 and its destructive boot/recovery consequences above remain unresolved and
 unauthorized.
 
+### NBD bounds before memory allocation
+
+The actual `serve_one` handler previously called `malloc(len)` for a large
+READ before validating its partition range. A local socketpair/malloc-wrap
+fixture reproduced an invalid `from=UINT64_MAX, len=UINT32_MAX` request
+attempting a 4 GiB allocation and returning `ENOMEM` instead of immediate
+`EIO`; the wrapper refused that allocation, so no large buffer was created.
+The handler now checks the existing subtraction-based bounds first. Valid
+large reads retain their existing allocation and out-of-memory behavior.
+
+The actual production handler passes 25 ASan/UBSan socketpair cases: overflow
+and boundary failures without allocation; valid zero, small, unaligned and
+large reads; simulated allocation failure; write/FUA-write refusal with fixed
+buffer draining; TRIM, unadvertised WRITE_ZEROES and unknown-command refusal;
+flush with no writable state; disconnect, invalid/truncated headers and
+truncated nominal 4 GiB writes. A WRITE followed by FLUSH proves the rejected
+payload is drained exactly and the next request retains its framing. Read
+fixtures use unmapped zero-filled LBAs; any PPN or MTD operation aborts the
+test. Only process-local Unix sockets are opened, without kernel NBD attach,
+real ioctl, device access or writable storage.
+
 ## Validation and limits
 
 ```sh
@@ -435,6 +458,7 @@ python3 tests/test-iosnand-parse.py
 python3 tests/test-iosnand-cache.py
 python3 tests/test-iosnand-mtd.py
 python3 tests/test-h2fmi-read.py
+python3 tests/test-iosnand-nbd.py
 ```
 
 Results: 22 Python binary-fixture/CLI tests, 36 C production-parser/bounds
@@ -442,7 +466,8 @@ cases, 95 production v2-cache/exact-sequence/map-oracle cases and 25 fake-ioctl 
 runs with both modern and simulated pre-MEMREAD build headers). In addition,
 21 actual H2FMI/MEMREAD/adapter integration cases pass. This harness imports
 only the exact local v6.12 MTD UAPI header and production functions, so old
-system headers are not replaced. The C harnesses
+system headers are not replaced. Another 25 actual NBD socketpair cases
+pass. The C harnesses
 run with AddressSanitizer and UndefinedBehaviorSanitizer, do not link `ppn.c`,
 and abort if a test reaches any PPN open/claim/read/lock stub. The production
 `scan_block` test finds a valid page after an all-FF page and reads all 256 pages.

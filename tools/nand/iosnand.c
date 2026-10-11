@@ -689,10 +689,13 @@ static int serve_one(struct export *e)
     switch (type) {
     case NBD_CMD_READ: {
         int r = 0;
-        if (len > sizeof(sbuf) && !(buf = malloc(len)))
+        /* Reject impossible ranges before reserving their requested memory.
+         * Subtraction avoids overflow of an untrusted from + len. */
+        if (from > e->p->size || len > e->p->size - from)
+            rp.error = htonl(EIO);
+        else if (len > sizeof(sbuf) && !(buf = malloc(len)))
             rp.error = htonl(ENOMEM);
-        else if (from > e->p->size || len > e->p->size - from ||
-                 read_part(e->p, from, buf, len))
+        else if (read_part(e->p, from, buf, len))
             rp.error = htonl(EIO);
         if (write_full(e->sock, &rp, sizeof(rp)) || (!rp.error && write_full(e->sock, buf, len)))
             r = -1;
