@@ -49,7 +49,9 @@
 
 #include "ppn.h"
 #include "iosnand-mtd.h"
+#include "iosnand-process.h"
 static int use_mtd;
+static const char *process_record_path;
 
 #define NLBA            (16000000000ull / 4096)         /* disk0, in 4 KB */
 #define NONE            0xffffffffu
@@ -878,11 +880,25 @@ static int serve_one(struct export *e)
     return write_full(e->sock, &rp, sizeof(rp));
 }
 
+/* 0: every own export ready; 1: pending; -1: foreign/error/timeout.
+ * Each pending result is checked again after the serve loop's bounded poll. */
+static int exports_ready(struct export *ex, int n, unsigned *attempts)
+{
+    for (int i = 0; i < n; i++) {
+        if (!process_kernel_state(i, ex[i].child, (ex[i].p->size / 4096) * 8)) continue;
+        if (errno != ENOENT && errno != EAGAIN) return -1;
+        if (++*attempts >= 10) { errno = ETIMEDOUT; return -1; }
+        return 1;
+    }
+    return 0;
+}
+
 static int serve(char **names, int n)
 {
     static char *deflt[] = { "System" };
     struct export ex[12];
-    int nex = 0, failed = 0;
+    int nex = 0, failed = 0, published_ready = 0;
+    unsigned readiness_attempts = 0;
     if (!n) {
         names = deflt;
         n = 1;
@@ -902,6 +918,13 @@ static int serve(char **names, int n)
     }
     if (!nex)
         return 1;
+    /* The wrapper's generation-ready API authorizes System on export zero.
+     * Manual unregistered serve retains its existing arbitrary-part API. */
+    if (process_record_path && strcmp(ex[0].p->name, "System")) {
+        fprintf(stderr, "iosnand: registered readiness requires System as export zero\n");
+        cleanup_exports(ex, nex);
+        return 1;
+    }
     signal(SIGTERM, on_signal);
     signal(SIGINT, on_signal);
     signal(SIGPIPE, SIG_IGN);
@@ -918,6 +941,20 @@ static int serve(char **names, int n)
         if (check_workers(ex, nex)) {
             failed = 1;
             break;
+        }
+        if (process_record_path && !published_ready) {
+            int pending = exports_ready(ex, nex, &readiness_attempts);
+            if (pending < 0) {
+                perror("iosnand: own export readiness failed (no reset)");
+                failed = 1; break;
+            }
+            if (!pending) {
+                if (process_publish_ready(process_record_path, ex[0].child, (ex[0].p->size / 4096) * 8)) {
+                    perror("iosnand: cannot publish export readiness");
+                    failed = 1; break;
+                }
+                published_ready = 1;
+            }
         }
         if (ready < 0)
             continue;
@@ -974,10 +1011,19 @@ static int check_args(int argc, char **argv, uint32_t *lba, uint32_t *n)
 
 int main(int argc, char **argv)
 {
+    const char *pid_record = NULL;
+    if (argc > 1 && !strcmp(argv[1], "--pid-record")) {
+        if (argc < 4 || !argv[2][0] || strcmp(argv[3], "serve")) {
+            fprintf(stderr, "iosnand: --pid-record PATH is only valid before serve\n");
+            return 1;
+        }
+        pid_record = argv[2];
+        argc -= 2; argv += 2;
+    }
     uint32_t read_start = 0, read_count = 0;
     int help = argc == 2 && (!strcmp(argv[1], "--help") || !strcmp(argv[1], "-h"));
     if (help || check_args(argc, argv, &read_start, &read_count)) {
-        fprintf(stderr, "usage: iosnand scan | parts | read LBA [N] | serve [PARTITION...]\n");
+        fprintf(stderr, "usage: iosnand scan | parts | read LBA [N] | [--pid-record PATH] serve [PARTITION...]\n");
         return help ? 0 : 1;
     }
     const char *backend = getenv("IOSNAND_BACKEND");
@@ -988,6 +1034,11 @@ int main(int argc, char **argv)
     use_mtd = backend && !strcmp(backend, "mtd");
     if (getenv("IOSNAND_CACHE"))
         cache_path = getenv("IOSNAND_CACHE");
+    if (pid_record && process_record_self(pid_record)) {
+        perror("iosnand: cannot publish private process record; no backend opened");
+        return 1;
+    }
+    process_record_path = pid_record;
     pages = calloc(PPN_DIES, sizeof(*pages));
     if (!pages) {
         fprintf(stderr, "iosnand: out of memory\n");

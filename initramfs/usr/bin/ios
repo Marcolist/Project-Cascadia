@@ -30,11 +30,12 @@ BACKEND=${IOSNAND_BACKEND-pio}
 say() { printf '%s\n' "$*"; }
 die() { printf 'ios: %s\n' "$*" >&2; exit 1; }
 
-serving() { [ -s $RUN/pid ] && kill -0 "$(cat $RUN/pid)" 2>/dev/null; }
+serving() { /sbin/iosnandctl status "$RUN/pid" >/dev/null 2>&1; }
 mounted() { grep -q " $MNT hfsplus " /proc/mounts 2>/dev/null; }
 
 need() {
     [ -x /sbin/iosnand ] || die "no /sbin/iosnand in this image"
+    [ -x /sbin/iosnandctl ] || die "no /sbin/iosnandctl in this image"
     [ -e /dev/nbd0 ] || die "no /dev/nbd0: this kernel was built without CONFIG_BLK_DEV_NBD"
     grep -q hfsplus /proc/filesystems || die "this kernel has no HFS+ (CONFIG_HFSPLUS_FS)"
 }
@@ -74,12 +75,25 @@ status() {
 start() {
     need
     serving && die "already serving (ios umount first)"
-    mkdir -p $RUN $MNT
+    # Do not chmod/trust an old or symlinked runtime directory.
+    if ! [ -e "$RUN" ] && ! [ -L "$RUN" ]; then
+        mkdir -m 0700 "$RUN" || die "cannot create private $RUN"
+    fi
+    /sbin/iosnandctl check-directory "$RUN/pid" || die "$RUN must be root-owned mode 0700"
+    if [ -e "$RUN/pid" ] || [ -L "$RUN/pid" ]; then
+        /sbin/iosnandctl clean "$RUN/pid" || die "PID record is active or untrusted; retained"
+    fi
+    mkdir -p "$MNT"
     scan_notice
-    iosnand serve System "$@" > $LOG 2>&1 &
-    echo $! > $RUN/pid
-    # iosnand attaches /dev/nbd0 once its map is ready
-    while ! [ "$(cat /sys/block/nbd0/size 2>/dev/null)" -gt 0 ] 2>/dev/null; do
+    /sbin/iosnand --pid-record "$RUN/pid" serve System "$@" > "$LOG" 2>&1 &
+    # Registration occurs after exec and before NAND opens. This bounded wait
+    # covers registration, not the full scan (whose timing is unverified).
+    i=0
+    while ! serving && [ "$i" -lt 20 ]; do sleep 0.5; i=$((i + 1)); done
+    serving || { cat "$LOG" >&2; die "iosnand did not register (no numeric-PID fallback)"; }
+    # A global/stale positive nbd0 size is not proof this daemon owns it.
+    # Ready checks this generation's worker PIDfd and the kernel pid attribute.
+    while ! /sbin/iosnandctl ready "$RUN/pid" >/dev/null 2>&1; do
         serving || { cat $LOG >&2; die "iosnand stopped"; }
         sleep 1
     done
@@ -89,13 +103,20 @@ start() {
         $MNT/System/Library/CoreServices/SystemVersion.plist 2>/dev/null) System on $MNT, read-only."
     [ -b /dev/nbd1 ] && [ "$(cat /sys/block/nbd1/size 2>/dev/null)" -gt 0 ] 2>/dev/null &&
         say "Data is on /dev/nbd1 (encrypted by iOS: raw only)."
+    return 0
 }
 
 stop_serving() {
-    serving && kill "$(cat $RUN/pid)" 2>/dev/null
-    i=0
-    while serving && [ $i -lt 20 ]; do sleep 0.5; i=$((i + 1)); done
-    rm -f $RUN/pid
+    [ -x /sbin/iosnandctl ] || die "no /sbin/iosnandctl in this image"
+    if serving; then
+        /sbin/iosnandctl stop "$RUN/pid" || die "pidfd stop refused; record retained"
+        i=0
+        while serving && [ "$i" -lt 20 ]; do sleep 0.5; i=$((i + 1)); done
+        serving && die "iosnand has not exited; record retained"
+    fi
+    if [ -e "$RUN/pid" ] || [ -L "$RUN/pid" ]; then
+        /sbin/iosnandctl clean "$RUN/pid" || die "PID record is untrusted or not expired; retained"
+    fi
 }
 
 case "$1" in

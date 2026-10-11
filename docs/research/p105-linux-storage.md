@@ -509,11 +509,107 @@ device access, kernel NBD attachment or signal is used. These fixtures test
 userspace control flow; they do not emulate every kernel configuration-ref
 or hardware behavior.
 
-The shell wrapper's separate unchecked/stale-PID issue remains outside this
-change. Four isolated baseline fixtures with fake kill demonstrate that PID
-existence alone does not identify `iosnand`. Numeric/starttime shell checks
-would still leave a check-to-signal race; a pidfd-based design is a separate
-review item. No real process was signaled in that research.
+## Private daemon registration, pidfd control and export readiness
+
+The four fake-kill baseline fixtures demonstrated that the old wrapper could
+signal a reused PID (including malformed group-like PID text). That numeric
+PID control has now been removed. The target-only `iosnandctl` helper and
+shared `iosnand-process.h` use Linux pidfds, never `kill(PID)` as a fallback.
+Do not run this target helper on the production Firebat. No real process has
+been signaled, registered or stopped during this work.
+
+`iosnand --pid-record /run/ios/pid serve System [Data]` validates its CLI and
+backend selection, then registers itself **after exec, before allocation,
+cache validation, any NAND open or scan**. It opens its own pidfd before
+checking proc identity and matches the actual executable inode/device against
+root-owned `/sbin/iosnand`. Record errors abort before either NAND backend.
+The shell no longer writes `$!`; it waits up to twenty half-second intervals
+for registration. That bounded wait covers startup registration, not a
+full NAND scan. Manual `iosnand serve` remains available without registration.
+`--pid-record` is refused for scan/parts/read and malformed arguments.
+
+A primary record is exact bounded decimal text:
+`IOSNANDPID1 PID STARTTIME EXE_DEVICE EXE_INODE\n`.
+PID 0, PID 1, negative/group-like values, overflow, legacy plain-PID files,
+truncation, unexpected fields and embedded NUL bytes are refused. The final
+parent directory must be root-owned mode 0700, pinned with an open directory
+FD; records must be regular root-owned mode 0600 with one link. The final
+parent/record components are opened without following symlinks and records
+with O_NONBLOCK, so FIFO input cannot hang control. Intermediate path
+components and other root processes remain trusted; this is not an ownership
+lease against privileged file replacement.
+
+Publication writes/fsyncs an exclusive private temporary file, links it to a
+new final name without overwrite, removes only the temporary file it created,
+and fsyncs the directory. Partial I/O/close/fsync failures may retain a
+published record, but never permit an unregistered backend start. `clean`
+removes only a valid expired primary record: pidfd ESRCH or an exact
+starttime/executable mismatch indicates expiration. Permission, read,
+unsupported-syscall, poll-error and unknown-format failures retain the file.
+An active record is refused with EBUSY. Publishing and cleaning use an
+exclusive directory flock to serialize cooperative clients; other root
+processes can still interfere. The wrapper does not chmod existing runtime
+directories, blindly remove legacy PID files, or escalate signals.
+
+For status/stop, pidfd_open occurs **before** proc identity checks. A pinned
+proc directory supplies field 22's starttime (comm parentheses/spaces are
+handled), executable inode/device, root process ownership and the serve
+command line. The bound pidfd is checked for exit both before and after these
+checks. Stop uses only pidfd_send_signal(SIGTERM) on that bound descriptor.
+A process exiting or its numeric PID being reused cannot redirect the signal
+at the replacement. Missing pidfd syscall definitions fail compilation;
+ENOSYS at runtime refuses control rather than falling back. POLLNVAL/POLLERR
+are preserved as errors and cannot classify an active record as expired.
+Before the serve-loop handler is installed, SIGTERM has its normal terminating
+behavior; a scan can be stopped without a NAND program/erase operation.
+
+Registration does **not** authorize mounting a globally positive nbd0 size.
+After all own exports attach, the daemon checks each kernel NBD worker PID,
+exact configured capacity and read-only flag, while monitoring early child
+failure. Missing pid attributes or an own PID with still-unmatched size/RO (EAGAIN)
+get at most ten poll cycles (each poll has a
+one-second timeout); failure or timeout unwinds only owned process FDs and
+children. No stale/foreign export is reset. The pinned v6.12 kernel exposes
+`pid` during DO_IT startup after parsing the read-only flag; SET_SIZE_BLOCKS
+has already configured the capacity before fork, and startup sets it again.
+See [`nbd_start_device`](https://github.com/torvalds/linux/blob/adc218676eef25575469234709c2d87185ca223a/drivers/block/nbd.c#L1397)
+and [`__nbd_ioctl`](https://github.com/torvalds/linux/blob/adc218676eef25575469234709c2d87185ca223a/drivers/block/nbd.c#L1506).
+
+Only then does registration publish a generation-specific private file
+`pid.ready.DAEMON_PID.STARTTIME` containing
+`IOSNANDREADY1 WORKER_PID STARTTIME EXE_DEVICE EXE_INODE EXPECTED_SECTORS\n`.
+Sectors equal `floor(partition_bytes / 4096) * 8`, exactly the existing NBD
+SET_SIZE_BLOCKS setup. `iosnandctl ready` binds both the current daemon and
+that generation's first worker with pidfds, verifies matching executable
+identity, rereads nbd0 kernel PID/size/ro=1 and checks both pidfds for exit.
+The wrapper mounts only after this check. Registered readiness requires
+System as export zero; this API confirms **System/nbd0**, not continuing Data
+ownership or a permanent lease against concurrent privileged NBD clients.
+Checks use canonical `/sys/devices/virtual/block/nbdN` so O_NOFOLLOW does not
+reject `/sys/block/nbdN`'s ordinary symlink. Generation files are retained
+until the RAM-backed runtime directory disappears at reboot; primary-record
+cleanup never deletes another generation's readiness file.
+
+No userspace pre-mount check can exclude a privileged foreign reconfiguration
+immediately afterward. Kernel stalls, actual process/sysfs integration,
+concurrent privileged NBD administration and hardware behavior remain
+unverified. Existing limits on cleanup waits still apply. No automatic
+restore, disconnect/CLEAR after possible DO_IT, host configuration change or
+NAND write has been introduced.
+
+`tests/test-iosnand-process.py` runs **84 actual production-header/main
+ASan/UBSan cases** with strict fake pidfd, proc/sysfs metadata, poll, record I/O,
+publication/cleanup and process APIs. Cases include reuse before/after binding,
+post-check death, ENOSYS, expired/active/legacy/private-file checks, short or
+wrong commands, exact executable matching, atomic no-overwrite/error cleanup,
+wrong/missing readiness generation, dead/reused worker, wrong/zero capacity,
+RW state, actual own-worker retry/foreign rejection/bounded timeout, and registered CLI failures before allocation/backend access. PPN,
+fork, ioctl, socketpair, wait and signal calls outside the fixtures abort.
+`tests/test-ios-wrapper-process.py` runs **10 actual wrapper-function fixtures**
+with an inert local helper and daemon, never real mounts/process signals:
+foreign positive capacity, stale generation and failed/reused workers cannot
+mount; own readiness permits System mount; safe stop/expiration removes only
+expired fixture state while refused/slow/untrusted control retains it.
 
 ## Validation and limits
 
@@ -525,6 +621,8 @@ python3 tests/test-iosnand-mtd.py
 python3 tests/test-h2fmi-read.py
 python3 tests/test-iosnand-nbd.py
 python3 tests/test-iosnand-lifecycle.py
+python3 tests/test-iosnand-process.py
+python3 tests/test-ios-wrapper-process.py
 ```
 
 Results: 22 Python binary-fixture/CLI tests, 36 C production-parser/bounds
@@ -533,7 +631,8 @@ runs with both modern and simulated pre-MEMREAD build headers). In addition,
 21 actual H2FMI/MEMREAD/adapter integration cases pass. This harness imports
 only the exact local v6.12 MTD UAPI header and production functions, so old
 system headers are not replaced. Another 25 actual NBD socketpair cases
-and 36 production lifecycle/fake-API cases pass. The C harnesses
+and 36 production lifecycle/fake-API cases pass. The new process/control
+fixtures add 84 strict fake-API C cases and 10 fake-control shell cases. The C harnesses
 run with AddressSanitizer and UndefinedBehaviorSanitizer, do not link `ppn.c`,
 and abort if a test reaches any PPN open/claim/read/lock stub. The production
 `scan_block` test finds a valid page after an all-FF page and reads all 256 pages.
