@@ -44,6 +44,7 @@ Storage and USB evidence:
 - [Read-only Linux storage and NBD limits](p105-linux-storage.md)
 - [MLC media type and strict read-only compatibility](p105-mtd-media-type.md)
 - [PPN error-list fields and unresolved AP/IOP ownership](p105-ppn-error-list-evidence.md)
+- [PPN translation/cache/completion and panic boundaries](p105-ppn-completion-boundaries.md)
 - [Strict synthetic error-list decoder and independent oracle](p105-ppn-synthetic-decoder.md)
 - [Existing NAND architecture](p105-nand.md)
 - [USB host/PHY evidence](p105-usb-host.md)
