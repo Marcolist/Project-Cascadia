@@ -13,8 +13,10 @@
 # /sbin/iosnand does the work (tools/nand/iosnand.c): it reads the NAND,
 # follows iOS's FTL to disk0 and its LwVM partitions, and serves them as
 # /dev/nbd0, /dev/nbd1.  It never writes to the NAND.  The first run reads
-# every page once (~15 minutes) and keeps a map in /var/lib/iosnand; after
-# that a start takes a few seconds plus whatever iOS rewrote in between.
+# every page once (upstream PIO ~12-15 minutes) and keeps pages.v2 under
+# /var/lib/iosnand (IOSNAND_CACHE overrides). PIO can then rescan changed
+# blocks; IOSNAND_BACKEND=mtd reads every page on every start. Cache-file
+# validation and network I/O also contribute to startup time.
 # Data is encrypted file by file (iOS content protection): it can be served,
 # but it does not mount as HFS+.  Installed from the image into /usr/bin on
 # every boot (initramfs/init).
@@ -22,6 +24,8 @@
 MNT=/mnt/ios
 RUN=/run/ios
 LOG=$RUN/iosnand.log
+CACHE=${IOSNAND_CACHE-/var/lib/iosnand/pages.v2}
+BACKEND=${IOSNAND_BACKEND-pio}
 
 say() { printf '%s\n' "$*"; }
 die() { printf 'ios: %s\n' "$*" >&2; exit 1; }
@@ -35,6 +39,22 @@ need() {
     grep -q hfsplus /proc/filesystems || die "this kernel has no HFS+ (CONFIG_HFSPLUS_FS)"
 }
 
+scan_notice() {
+    case "$BACKEND" in
+        mtd)
+            say "MTD backend: every start reads the full NAND map (cache: $CACHE)."
+            say "(full scan timing is unverified; cached PIO timings do not apply)" ;;
+        pio)
+            if [ -f "$CACHE" ]; then
+                say "PIO backend: validating $CACHE and checking for changed blocks."
+            else
+                say "PIO backend: no v2 cache at $CACHE; the first scan reads the whole NAND."
+                say "(earlier upstream PIO full scan: ~12-15 minutes)"
+            fi ;;
+        *) say "Invalid IOSNAND_BACKEND: iosnand requires pio or mtd." ;;
+    esac
+}
+
 status() {
     if mounted; then
         say "iOS System is mounted read-only on $MNT ($(df -h $MNT | awk 'NR==2 { print $3 " used" }'))."
@@ -45,7 +65,7 @@ status() {
         say "  ios umount         stop it"
     else
         say "iOS's partitions are not mounted."
-        [ -f /var/lib/iosnand/pages.v1 ] || say "(the first mount reads the whole NAND once: ~15 minutes)"
+        scan_notice
         say "  ios mount          System, read-only, on $MNT"
         say "  ios parts          what is there"
     fi
@@ -55,7 +75,7 @@ start() {
     need
     serving && die "already serving (ios umount first)"
     mkdir -p $RUN $MNT
-    say "reading the NAND map (a few seconds; ~15 minutes the very first time)..."
+    scan_notice
     iosnand serve System "$@" > $LOG 2>&1 &
     echo $! > $RUN/pid
     # iosnand attaches /dev/nbd0 once its map is ready

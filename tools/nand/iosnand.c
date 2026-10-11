@@ -391,11 +391,23 @@ static int scan(int verbose)
     return rescanned;
 }
 
+/* The page table already owns the exact sequence for every physical chunk.
+ * Compare against the current winner there instead of a second NLBA-sized
+ * uint64_t table (~29.8 MiB). It is immutable during map construction. */
+static uint64_t loc_sequence(uint32_t loc)
+{
+    uint32_t key = loc >> 2;
+    uint32_t die = key / (PPN_BLOCKS * PPN_PAGES);
+    uint32_t blk = key / PPN_PAGES % PPN_BLOCKS;
+    uint32_t pg = key % PPN_PAGES;
+
+    return page_seq(&pages[die][blk][pg], loc & 3);
+}
+
 static void build_l2p(void)
 {
-    uint64_t *best = calloc(NLBA, sizeof(uint64_t));
     l2p = malloc(NLBA * sizeof(uint32_t));
-    if (!best || !l2p) {
+    if (!l2p) {
         fprintf(stderr, "iosnand: out of memory\n");
         exit(1);
     }
@@ -410,16 +422,14 @@ static void build_l2p(void)
                 for (int k = 0; k < 4; k++) {
                     uint32_t lba = p->lba[k];
                     uint64_t seq = page_seq(p, k);
-                    if (lba >= NLBA || (l2p[lba] != NONE && seq <= best[lba]))
+                    if (lba >= NLBA || (l2p[lba] != NONE && seq <= loc_sequence(l2p[lba])))
                         continue;
                     if (l2p[lba] == NONE)
                         mapped++;
-                    best[lba] = seq;
                     l2p[lba] = (((uint32_t)die * PPN_BLOCKS + blk) * PPN_PAGES + pg) * 4 + k;
                 }
             }
         }
-    free(best);
     fprintf(stderr, "iosnand: %u of %llu LBAs mapped\n", mapped, (unsigned long long)NLBA);
 }
 

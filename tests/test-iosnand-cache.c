@@ -38,6 +38,70 @@ static void set_meta(uint8_t *m, uint32_t lba, uint64_t seq)
         m[8 + i] = lba >> (8 * i);
 }
 
+/* Small independent oracle uses the originally generated sequence value,
+ * never page_seq/loc_sequence, and tracks deterministic first-wins ties. */
+static uint64_t oracle_seq[68];
+static uint32_t oracle_loc[68];
+static uint32_t random_state = 0x19465a5u;
+static uint32_t random_word(void)
+{
+    random_state ^= random_state << 13;
+    random_state ^= random_state >> 17;
+    random_state ^= random_state << 5;
+    return random_state;
+}
+
+static void candidate(unsigned die, unsigned blk, unsigned pg, unsigned k,
+                      unsigned lba, uint64_t seq)
+{
+    struct page_rec *p = &pages[die][blk][pg];
+    p->lba[k] = lba;
+    set_seq(p, k, seq);
+    blocks[die][blk].state = B_DATA;
+    if (blocks[die][blk].written < pg + 1)
+        blocks[die][blk].written = pg + 1;
+    if (oracle_loc[lba] == NONE || seq > oracle_seq[lba]) {
+        oracle_seq[lba] = seq;
+        oracle_loc[lba] = ((die * PPN_BLOCKS + blk) * PPN_PAGES + pg) * 4 + k;
+    }
+}
+
+static unsigned random_map_test(void)
+{
+    memset(blocks, 0, sizeof(blocks));
+    memset(pages, 0, PPN_DIES * sizeof(*pages));
+    memset(oracle_loc, 0xff, sizeof(oracle_loc));
+    memset(oracle_seq, 0, sizeof(oracle_seq));
+    for (unsigned die = 0; die < PPN_DIES; die++)
+        for (unsigned b = 0; b < 2; b++)
+            for (unsigned pg = 0; pg < 17; pg++)
+                for (unsigned k = 0; k < 4; k++) {
+                    unsigned lba = random_word() % 64;
+                    uint64_t seq = (uint64_t)(random_word() & 0xffff) << 32;
+                    seq |= random_word();
+                    candidate(die, b * 2 + 1, pg, k, lba, seq);
+                }
+    /* Cross-die/cross-chunk duplicates include valid zero, maximal u48,
+     * equal-sequence first-wins and a later strictly newer candidate. */
+    candidate(0, 7, 0, 0, 64, 0);
+    candidate(0, 7, 0, 1, 65, (1ull << 48) - 1);
+    candidate(0, 7, 0, 2, 66, 900);
+    candidate(0, 7, 0, 3, 67, 900);
+    candidate(3, 7, 0, 3, 64, 0);
+    candidate(3, 7, 0, 2, 65, (1ull << 48) - 1);
+    candidate(3, 7, 0, 1, 66, 900);
+    candidate(3, 7, 0, 0, 67, 901);
+    build_l2p();
+    for (unsigned lba = 0; lba < 68; lba++) {
+        assert(l2p[lba] == oracle_loc[lba]);
+        assert(loc_sequence(l2p[lba]) == oracle_seq[lba]);
+    }
+    assert(l2p[68] == NONE && l2p[NLBA - 1] == NONE);
+    free(l2p);
+    l2p = NULL;
+    return 69;
+}
+
 static FILE *edit_cache(void)
 {
     FILE *f = fopen(cache_path, "r+b");
@@ -213,6 +277,11 @@ int main(void)
     /* The actual command exits on an old/foreign override before ppn_open:
      * the backend stubs would abort this process if regression reached it. */
     cache_path = path;
+    free(pages);
+    pages = NULL;
+    pages = calloc(PPN_DIES, sizeof(*pages));
+    assert(pages);
+    checks += random_map_test();
     free(pages);
     pages = NULL;
     setenv("IOSNAND_CACHE", path, 1);

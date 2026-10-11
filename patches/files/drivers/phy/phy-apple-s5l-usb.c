@@ -237,9 +237,26 @@ static const struct phy_ops s5l_usbphy_ops = {
 	.owner = THIS_MODULE,
 };
 
+/* These flags track our enable references, not the physical rail state.
+ * P105's supplies have no parent, coupling or consumer load; a provider
+ * disable error precedes reference release. Revisit error/retry accounting
+ * if that topology changes: regulator_disable() can otherwise fail late. */
+static int s5l_supply_disable(struct regulator *supply, bool *on)
+{
+	int ret;
+
+	if (!*on)
+		return 0;
+	ret = regulator_disable(supply);
+	if (!ret)
+		*on = false;
+	return ret;
+}
+
 static int s5l_hostphy_power_on(struct phy *phy)
 {
 	struct s5l_usbphy *p = phy_get_drvdata(phy);
+	bool enabled_lpo = false, enabled_hsic = false;
 	int ret;
 
 	/* The 32 kHz clock first, the way a chip expects its sleep clock
@@ -248,8 +265,8 @@ static int s5l_hostphy_power_on(struct phy *phy)
 		struct regulator *r = devm_regulator_get_optional(p->dev, "lpo");
 
 		if (IS_ERR(r)) {
-			if (PTR_ERR(r) == -EPROBE_DEFER)
-				return -EPROBE_DEFER;
+			if (PTR_ERR(r) != -ENODEV)
+				return PTR_ERR(r);
 		} else {
 			p->lpo_supply = r;
 		}
@@ -259,6 +276,7 @@ static int s5l_hostphy_power_on(struct phy *phy)
 		if (ret)
 			return ret;
 		p->lpo_supply_on = true;
+		enabled_lpo = true;
 		msleep(10);
 	}
 
@@ -266,8 +284,10 @@ static int s5l_hostphy_power_on(struct phy *phy)
 		struct regulator *r = devm_regulator_get_optional(p->dev, "hsic");
 
 		if (IS_ERR(r)) {
-			if (PTR_ERR(r) == -EPROBE_DEFER)
-				return -EPROBE_DEFER;
+			if (PTR_ERR(r) != -ENODEV) {
+				ret = PTR_ERR(r);
+				goto undo_supplies;
+			}
 			dev_warn(p->dev, "no hsic-supply (%ld): the HSIC device stays unpowered\n",
 				 PTR_ERR(r));
 		} else {
@@ -277,15 +297,18 @@ static int s5l_hostphy_power_on(struct phy *phy)
 	if (p->hsic_supply && !p->hsic_supply_on) {
 		ret = regulator_enable(p->hsic_supply);
 		if (ret)
-			return ret;
+			goto undo_supplies;
 		p->hsic_supply_on = true;
+		enabled_hsic = true;
 		msleep(10);
 	}
 
 	ret = s5l_pmgr_on(p, PMGR_USB_EHCI);
 	if (ret)
-		return ret;
-	s5l_pmgr_on(p, PMGR_USB_OHCI0);
+		goto undo_supplies;
+	ret = s5l_pmgr_on(p, PMGR_USB_OHCI0);
+	if (ret)
+		goto undo_supplies;
 	if (p->usbcplx)
 		writel(readl(p->usbcplx) | USBCPLX_HSIC_EN, p->usbcplx);
 
@@ -293,21 +316,27 @@ static int s5l_hostphy_power_on(struct phy *phy)
 		 readl(p->pmgr + PMGR_USB_EHCI), readl(p->pmgr + PMGR_USB_OHCI0),
 		 p->usbcplx ? readl(p->usbcplx) : 0);
 	return 0;
+
+undo_supplies:
+	/* Undo only references acquired by this call. PMGR rollback is not
+	 * defined here; do not invent a gate-off/reset sequence on a timeout. */
+	if (enabled_hsic &&
+	    s5l_supply_disable(p->hsic_supply, &p->hsic_supply_on))
+		dev_warn(p->dev, "could not undo HSIC supply enable\n");
+	if (enabled_lpo &&
+	    s5l_supply_disable(p->lpo_supply, &p->lpo_supply_on))
+		dev_warn(p->dev, "could not undo LPO supply enable\n");
+	return ret;
 }
 
 static int s5l_hostphy_power_off(struct phy *phy)
 {
 	struct s5l_usbphy *p = phy_get_drvdata(phy);
+	int ret, lpo_ret;
 
-	if (p->hsic_supply_on) {
-		regulator_disable(p->hsic_supply);
-		p->hsic_supply_on = false;
-	}
-	if (p->lpo_supply_on) {
-		regulator_disable(p->lpo_supply);
-		p->lpo_supply_on = false;
-	}
-	return 0;
+	ret = s5l_supply_disable(p->hsic_supply, &p->hsic_supply_on);
+	lpo_ret = s5l_supply_disable(p->lpo_supply, &p->lpo_supply_on);
+	return ret ? ret : lpo_ret;
 }
 
 static const struct phy_ops s5l_hostphy_ops = {

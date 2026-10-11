@@ -239,10 +239,14 @@ own temporary. Publication checks reject a foreign existing destination too;
 cooperative tools take the bus locks, but this is not a hostile-path-race API.
 
 The page table grows from 26,148,864 to 43,581,440 bytes: **16.625 MiB additional
-RAM** on a 512 MiB iPad, plus the existing ~44.7 MiB transient best/L2P arrays
-when constructing the map. Caches remain ordinary host/Linux filesystem
-files; no NAND programming is added. ARM compilation and real-device memory
-headroom belong to their respective build/hardware validation steps.
+RAM** on a 512 MiB iPad. Map construction now compares the winner's sequence
+directly in that immutable page table instead of allocating a duplicate
+`uint64_t best[NLBA]`. This saves **31,250,000 bytes / 29.802 MiB peak RAM**;
+the 15,625,000-byte L2P table remains. Valid sequence zero, first-wins ties and
+full u48 comparisons are preserved. A separate 68-LBA oracle and 544 generated
+candidates check the actual map builder without using its sequence decoder
+to calculate the expected result. Caches remain ordinary Linux filesystem
+files; no NAND programming is added.
 
 ### Explicit read-only MTD backend (`tools/nand/iosnand-mtd.h`)
 
@@ -329,6 +333,100 @@ cannot serialize unrelated `/dev/mem` clients. The driver still relies on
 inherited iBoot timing/clock state and fixed upstream geometry. These remain
 hardware/architecture questions; no raw recovery sequence was executed here.
 
+## RAM and scan-time budget on a 512 MiB iPad
+
+These are source/build measurements and explicitly labeled extrapolations,
+not measurements from the attached iPad. The tools still target upstream's
+fixed 16 GB geometry; our unit's actual storage capacity has not been read.
+This path uses **NBD, not FUSE** (`CONFIG_BLK_DEV_NBD=y`; FUSE is disabled in
+the built configuration).
+
+| Item | Bytes / MiB | Lifetime and evidence |
+| --- | --- | --- |
+| Exact page records | 43,581,440 / 41.563 | `4 * 1064 * 256 * sizeof(page_rec)`; resident while serving |
+| Logical-to-physical map | 15,625,000 / 14.901 | `NLBA * sizeof(uint32_t)`; resident while serving |
+| Removed duplicate winner table | 31,250,000 / 29.802 | Previously allocated during map construction; now absent |
+| Existing ARM static ELF text/data/BSS | 1,696,776 / 1.618 | `size build/night-tools/iosnand-v2-cache`, before the small map optimization; includes global raw-page/cache/block/NBD buffers and libc |
+| Cache v2 file | 43,649,576 / 41.627 | 40-byte header + block records + page records; RAM-backed files consume separate memory |
+| Two cache files during atomic save | 87,299,152 / 83.255 | Existing cache plus new temporary until publication; relevant on a RAM root |
+
+The source-accounted process baseline falls from **87.884 MiB at map-building
+peak to about 58.082 MiB**, before stacks, allocator bookkeeping, kernel queues
+and filesystem page cache. Serving does not release the page or L2P tables.
+The NBD workers fork after mapping: these immutable tables are initially
+shared through copy-on-write, so summing each worker's RSS overcounts physical
+memory. Worker page tables/private changes and filesystem read caching still
+add memory. The existing oversized-NBD-request allocation path also makes
+an arbitrary userspace request a poor substitute for measured kernel I/O.
+
+MTD adds two kernel bus raw buffers totaling 32,896 bytes. An aligned MEMREAD
+also has 16,448 bytes of kernel data/OOB bounce storage; the userspace adapter
+uses approximately 20 KiB of stack arrays/request state. These are small
+compared with the map. This accounting does not estimate slab, network queues,
+HFS+ caches or the eventual Wi-Fi/graphics workload.
+
+The checked local Device Tree advertises **502.984 MiB** of RAM at
+`0x80000000`; the 4 MiB framebuffer begins beyond that range and must not be
+subtracted twice. A separate 4 KiB reset page is reserved inside it. Boot-time
+patches may change the effective ranges. The kernel config selects 64 MiB CMA,
+but movable allocations can occupy CMA memory: it is not automatically a
+64 MiB private loss. Swap support is compiled in, without an activated swap
+device in this workflow.
+
+The current build's unpacked initramfs tree occupies about 36 MiB on the host
+filesystem. That is a rough file-footprint estimate, not an observed device
+RSS. `readelf -sW build/linux/vmlinux` gives a 44.718 MiB `_text` to `_end`
+range including alignment and init memory; the 18 MiB `__init_begin` to
+`__init_end` range is normally reclaimed after initialization. A rough sum of
+the retained kernel range, tree, process tables and one RAM-backed cache is
+about **163 MiB**, or **190 MiB while replacing an existing cache** before
+building the map. Some file/executable pages overlap in that simple sum.
+Dynamic kernel/process allocations, page cache, boot overlap and other
+workloads are omitted; it is not a guarantee of safe headroom. With init memory
+still retained, add another 18 MiB to these examples. RAM-root cache files
+and recovered filesystem images cannot be treated as free disk space.
+
+Before any separately approved device test, the practical acceptance metrics
+are real `MemTotal`, `MemAvailable`, process RSS/PSS, CMA availability and OOM
+logs during scan/cache-save/map-build/serve. Do not perform that test here.
+Keep the Python dump reconstructor and multi-gigabyte recovered images on
+the Firebat: on 64-bit Python its two NLBA-sized lists alone need about
+59.6 MiB of pointers, and distinct integer objects can push a full mapping
+to roughly 300 MiB before input/output buffers.
+
+### Full scans: historical timing is not an MTD result
+
+The [upstream NAND notes](p105-nand.md) record an earlier **714-second PIO
+metadata scan** on an iOS 8.4.1 unit: 2,944 data blocks, 1,277 erased and 31
+retired. The same notes report 14.6 MB/s PIO into tmpfs. These are upstream
+measurements, not local device logs. Cached v1 PIO's old one-second result
+does not measure the larger, checksum-validated v2 cache or MTD.
+
+Current MTD cannot obtain the PPN `0x49` block-head status through ordinary
+MTD OOB and therefore conservatively scans all 256 pages, even when a page is
+all-FF; known retired blocks can still stop early. At fixed geometry, 4,252
+non-boot blocks imply up to **1,088,512 full 16,448-byte page reads**, about
+17.90 GB. Dividing by the historical 14.6 MB/s yields **20.4 minutes of
+illustrative raw transfer time**. Different hardware, ioctl/copy/CRC/cache
+costs and retired-block handling can change this materially; this is neither
+a measured duration nor a guaranteed lower bound. Avoid a short scan watchdog
+based on cached PIO timings.
+
+Cache load/save also transfers about 44 MB each. The upstream notes' roughly
+5.5 MB/s NFS writes and 7 MB/s reads would add seconds per cache operation,
+but network write buffering means those numbers do not establish fsync
+completion time. `ios` now reports the selected backend and `IOSNAND_CACHE`
+path, identifies every MTD start as a full scan and avoids promising a few
+seconds merely because a cache file exists. Its start/stop/mount operations
+are unchanged; shell syntax and isolated announcement fixtures were checked.
+
+Read recovery remains distinct from Linux-owned storage: a read-only System
+NBD device neither creates a writable Linux root nor decrypts iOS-protected
+Data files. RAM root, an approved NFS root or future proven USB storage can
+keep Linux state without NAND writes. The separate writable PPN/FTL design
+and its destructive boot/recovery consequences above remain unresolved and
+unauthorized.
+
 ## Validation and limits
 
 ```sh
@@ -340,7 +438,7 @@ python3 tests/test-h2fmi-read.py
 ```
 
 Results: 22 Python binary-fixture/CLI tests, 36 C production-parser/bounds
-cases, 26 production v2-cache/exact-sequence cases and 25 fake-ioctl MTD layout/error/geometry cases pass (the last group
+cases, 95 production v2-cache/exact-sequence/map-oracle cases and 25 fake-ioctl MTD layout/error/geometry cases pass (the last group
 runs with both modern and simulated pre-MEMREAD build headers). In addition,
 21 actual H2FMI/MEMREAD/adapter integration cases pass. This harness imports
 only the exact local v6.12 MTD UAPI header and production functions, so old
