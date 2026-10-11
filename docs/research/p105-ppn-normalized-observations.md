@@ -6,6 +6,11 @@ file/device I/O, firmware execution, pointer dereference, MMIO, kernel API,
 opcode or driver integration. Request records are normalized caller inputs;
 the module does not parse an Apple C/R descriptor ABI or enable NAND writes.
 
+Import from the repository root with
+`from tools.nand.ppn_observations import RequestSnapshot, Observation, reconcile_observations`
+and use `RequestEntry` from `tools.nand.ppn_error_list`. Direct module use with
+`tools/nand` on the Python path remains supported.
+
 ## Explicit offline binding
 
 `RequestSnapshot(generation, entries)` validates and copies the normalized

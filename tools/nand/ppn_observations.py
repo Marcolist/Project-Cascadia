@@ -7,7 +7,10 @@ success, durability, retirement or a recovery operation.
 
 from dataclasses import dataclass, field
 
-from ppn_error_list import DecodeError, RequestEntry, decode_error_list
+if __package__:
+    from .ppn_error_list import DecodeError, RequestEntry, decode_error_list
+else:
+    from ppn_error_list import DecodeError, RequestEntry, decode_error_list
 
 
 def _synthetic_id(value, name):
