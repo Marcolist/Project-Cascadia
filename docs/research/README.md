@@ -30,6 +30,7 @@ Charging evidence:
 - [Charging status and blocked recovery paths](p105-charge-status.md)
 - [ADC identities and scaling with acquisition blocked](p105-d1946-adc.md)
 - [ADC completion, IRQ and quiesce with fake I/O](p105-d1946-adc-lifecycle.md)
+- [ARM clock interval conversion with fake frequency and time](p105-clock-intervals.md)
 - [USB gadget budget integration gap](p105-usb-charge-budget.md)
 - [Host current-offset request receiver](p105-usb-current-request.md)
 

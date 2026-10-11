@@ -81,6 +81,9 @@ ten repository lifecycle tests. The published acquisition harness's fake
 clock merely records the deadline arguments; it does not measure timing or
 validate the required analog settle period.
 
+The clock comparison is now separately reproducible with a hash-pinned
+tool and ten additional tests; see [ARM clock intervals](p105-clock-intervals.md).
+
 Apple's historical [clock API declarations](https://github.com/apple-oss-distributions/xnu/blob/xnu-2782.40.9/osfmk/kern/clock.h)
 also distinguish nanosecond conversion from absolute-time ticks, and
 [clock_interval_to_deadline](https://github.com/apple-oss-distributions/xnu/blob/xnu-2782.40.9/osfmk/kern/clock.c#L835)
