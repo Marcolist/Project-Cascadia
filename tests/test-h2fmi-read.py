@@ -148,7 +148,7 @@ static int h2fmi_read_page_at(struct mtd_info *m, loff_t from, u8 *data, u8 *oob
     c += function(char, 'mtdchar_read_ioctl') + '\n'
     c += '#undef PPN_ROW\n#include "' + str(ROOT / 'tools/nand/ppn.h') + '"\n'
     c += '#define IOSNAND_IOCTL kernel_ioctl\nstatic int kernel_ioctl(int, unsigned long, void *);\n'
-    c += '#include "' + str(ROOT / 'tools/nand/iosnand-mtd.h') + '"\n' 
+    c += '#include "' + str(ROOT / 'tools/nand/iosnand-mtd.h') + '"\n'
     c += r'''
 static void reset(void) {
  memset(seen, 0, sizeof(seen)); calls=0;
