@@ -108,18 +108,19 @@ class SoCGPIOMasks(unittest.TestCase):
         self.assertEqual(runtime['final'], 0x29E)
         self.assertEqual(runtime['final'] & 0x60, oracle['final'] & 0x60)
         self.assertNotEqual(runtime['final'], oracle['final'])
-        # An inherited software PERIPH flag is a separate issue: a mask-only
-        # fix does not fix direction_input retaining peripheral mode.
+        # The separate explicit-input fix clears cached PERIPH before refresh;
+        # it keeps the existing Linux input IRQ policy rather than copying mode0.
         inherited = self.callbacks.run(4, 0x2B0)
         self.assertEqual(inherited['initial_stat'], 0x20)
-        self.assertEqual(inherited['final_stat'], 0x20)
-        self.assertEqual(inherited['final'] & 0x60, 0x20)
+        self.assertEqual(inherited['final_stat'], 0)
+        self.assertEqual(inherited['final'], 0x29E)
+        self.assertEqual(inherited['final'] & 0x60, 0)
 
     def test_initial_alternate_function_is_not_recognized_as_peripheral(self):
         result = self.callbacks.run(4, 0x2D0)
         self.assertEqual(result['initial_stat'], 0)
-        # For bit20, initial peripheral state is recognized. The narrow fix
-        # intentionally leaves this decoder and input-state policy unchanged.
+        # Bit20 inherited peripheral state remains recognized by initialization;
+        # explicit direction_input now clears that cached flag after decoding.
         other = self.callbacks.run(4, 0x2B0)
         self.assertEqual(other['initial_stat'], 0x20)
 

@@ -48,8 +48,11 @@ Linux source is
 `patches/files-sandcastle-port/drivers/pinctrl/pinctrl-s5l8940x-gpio.c`.
 The audited pre-fix baseline SHA256 was
 `e71fc77818ad2a6358b55ee8233da79c30b2f88985decd9e34bcadb01456c53f`.
-The corrected source SHA256 is
+The selector-mask-only corrected source SHA256 was
 `d0486b6e605be4770fcc6a6d24d48e147e7e1fa4409a9cdc2272bd00e453664d`.
+The current source, including the separate explicit-input correction described
+in [the lifecycle audit](p105-gpio-input-lifecycle.md), is SHA256
+`a26ca2e2c3ed16fc7ccaf3bffdea4c593c28d43e1845a830927c2d1d4bdcd88b`.
 Every result includes the hash of the source actually compiled. The temporary
 legacy-mask control rejects unexpected callback shape. The harness extracts the existing
 macros and eight callback bodies; it does not reimplement the Linux decisions in
@@ -90,7 +93,8 @@ clear mask. The second job was too narrow. The fix introduces a separate
 - Peripheral refresh additionally clears `0x60`, then continues to set `0x20`.
 - Function count/names, software flags, DATA/IRQ handling, initialization
   decoder, `CFG_DONE`, register width, timing and all board consumers remain
-  as in the existing driver.
+  as in the existing driver for this mask change. A later, separately tested
+  input correction clears cached PERIPH on explicit input; see the lifecycle audit.
 
 Representative final fake-register values, starting with `CFG_DONE` already
 set. The first result column reproduces the old masks in a temporary control;
@@ -104,9 +108,12 @@ the second executes the actual corrected source:
 | Set output high | `0x2d2` | `0x2d3` | `0x293` | `0x293`, mode 15 |
 | Plain input | `0x2d0` | `0x2de` | `0x29e` | `0x290`, mode 0 |
 | Select peripheral | `0x2d0` | `0x2f0` | `0x2b0` | `0x2b0`, mode 2 |
-| Input with inherited peripheral | `0x2b0` | `0x2b0` | `0x2b0` | `0x290`, mode 0 |
+| Input with inherited peripheral | `0x2b0` | `0x29e` | `0x29e` | `0x290`, mode 0 |
 
-The last two input rows deliberately record remaining differences. They are not
+Both Linux columns use the current input callback; the legacy-mask control
+reverts only the four selector clear masks. The exact historical inherited-input
+result `0x2b0` is separately reproduced by the lifecycle fixture.
+The two input rows deliberately record the remaining IRQ-policy difference. They are not
 passed off as firmware equivalence. All four refresh branches are separately
 covered by actual-C fixtures. Upper 32-bit fields are preserved: input
 `0xa50002d0` becomes output high `0xa5000293` in the corrected source. The firmware
@@ -137,8 +144,8 @@ pull definitions are not A5 register documentation.
 Linux's pinmux core invokes optional GPIO request/direction hooks when provided;
 it does not substitute a call to the driver's `set_mux("gpio")` when those hooks
 are absent. This A5 driver supplies neither `gpio_request_enable` nor
-`gpio_set_direction`, so that path does not resolve its inherited input-state
-issue.
+`gpio_set_direction`; the separately corrected direction-input callback must
+therefore leave inherited peripheral mode itself.
 [Primary core source at the same Linux revision](https://raw.githubusercontent.com/torvalds/linux/adc218676eef25575469234709c2d87185ca223a/drivers/pinctrl/pinmux.c).
 
 ## Applied narrow fix and excluded changes
@@ -152,9 +159,11 @@ function and software-state decoder. Replacing that constant globally with
 These distinct questions remain for separate review and authorized hardware
 validation:
 
-1. `direction_input()` clears OUTEN but retains cached PERIPH. It can leave an
-   explicitly requested GPIO input in peripheral mode. A mux-mask change alone
-   does not fix this.
+1. The separate [GPIO lifecycle correction](p105-gpio-input-lifecycle.md) now
+   clears cached OUTEN and PERIPH for explicit direction-input, including IRQ
+   startup. Its exact historical control reproduced successful input APIs still
+   leaving the pad in peripheral mode; a mux-mask change alone did not fix it.
+   ASIS request/free and the initialization decoder remain unchanged.
 2. Initialization recognizes `0x20`, but not a `0x40`-only alternate function.
    Representing unknown inherited functions requires a separate state policy.
 3. Firmware mode 2 preserves IRQ/DATA; Linux clears IRQ and applies cached DATA.

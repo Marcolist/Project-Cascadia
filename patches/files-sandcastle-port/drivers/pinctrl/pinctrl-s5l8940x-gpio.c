@@ -296,7 +296,7 @@ static int apple_s5l8940x_gpio_gpio_direction_input(struct gpio_chip *chip, unsi
 {
     struct apple_s5l8940x_gpio_pinctrl *pctl = gpiochip_get_data(chip);
 
-    pctl->pin_cfgs[offset].stat &= ~PINCFG_STAT_OUTEN;
+    pctl->pin_cfgs[offset].stat &= ~(PINCFG_STAT_OUTEN | PINCFG_STAT_PERIPH);
     apple_s5l8940x_gpio_refresh_reg(pctl, offset);
     return 0;
 }

@@ -1,3 +1,5 @@
 # Unified-diff context prefixes contain legitimate leading spaces before tabs.
 # Check added kernel lines with git apply --whitespace=error-all/checkpatch.
 patches/tree/*.patch -whitespace
+
+tests/fixtures/*.patch -whitespace
