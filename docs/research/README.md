@@ -28,6 +28,7 @@ Charging evidence:
 - [Source-event notifications](p105-source-events.md)
 - [Input-current backoff, stored cap and deadline](p105-source-backoff.md)
 - [Charging status and blocked recovery paths](p105-charge-status.md)
+- [ADC identities and scaling with acquisition blocked](p105-d1946-adc.md)
 - [USB gadget budget integration gap](p105-usb-charge-budget.md)
 - [Host current-offset request receiver](p105-usb-current-request.md)
 
