@@ -57,11 +57,12 @@ static unsigned long msecs_to_jiffies(unsigned int t){return t;}
 static u64 ktime_get_ns(void){return NSEC_PER_SEC;}
 static int failed_snapshot(void *ctx,struct power_supply *i,struct power_supply *b,struct d1946_snapshot *s){(void)ctx;(void)i;(void)b;(void)s;snapshots++;return provider_error;}
 static bool denied_valid(void *c,const struct d1946_snapshot *s){(void)c;(void)s;return false;}
+static bool owned_usb2_source,allow_usb2_current;
 static const struct d1946_current_provider denied_provider={NULL,failed_snapshot,denied_valid};
 static int d_read(void *ctx,unsigned int reg,u8 *out,unsigned int n){struct d1946_current *d=ctx;return d->io.read(d->io.context,reg,out,n);}
 static void power_supply_changed(struct power_supply *p){assert(p);changes++;}
 '''
-  for name in ['d_queue','d_invalidate','d_fault','d_snapshot_valid','d_profile_floor','d_decoded_input','d_worker']:c+=function(src,name)+'\n'
+  for name in ['d_queue','d_invalidate','d_fault','d_snapshot_valid','d_profile_floor','d_decoded_input','d_charge_for_input','d_worker']:c+=function(src,name)+'\n'
   c+=r'''
 static void init(struct d1946_current *d,struct fake *f){
  memset(d,0,sizeof(*d));setup(f,0xbf);d->io=(struct d1946_io){f,read_fake,write_fake};

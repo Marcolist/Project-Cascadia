@@ -1,7 +1,7 @@
-# Isolated current frontend v5: actual owned source/gauge integration
+# Isolated current frontend v6: actual owned source/gauge integration
 
 This is an offline Linux C candidate. It is not installed, enabled, loaded, or
-wired to a DT node. The Kconfig default and all three experiment parameters are
+wired to a DT node. The Kconfig default and all four experiment parameters are
 false. No device transaction or normal kernel build/configuration was changed.
 It is not a physically validated charger and supplies no guessed CV, termination,
 OTP, watchdog, temperature-threshold or analog-fault initialization.
@@ -10,7 +10,8 @@ The production current register core is byte-identical to v2. Its checked
 transactions, current/profile readback interpretation, inherited limits,
 exclusive read-clear event ownership, error latch and bounded shutdown attempts
 are retained. The new code connects an actual producer and fixes lifetime races;
-it does not expand the allowed analog/current policy.
+the further default-false USB2 selection policy below changes nominal plans
+without adding analog/protection register settings.
 
 ## Actual producer attachment
 
@@ -189,9 +190,10 @@ Primary kernel contracts:
 
 The actual producer closes the former missing source/gauge factory gap. Current
 CDC2 still provides 0 mA allowance. Explicit alternative USB2 descriptors can
-supply at most 500 mA protocol allowance; they are not changed here. The frontend
-retains its conservative **experimental** input>=1000 mA restriction before
-nonzero charging, so this owned USB2-only path will not enable charging. This is
+supply at most 500 mA protocol allowance; they are not changed here. The frontend retains zero charge selection for owned USB2 by default. A further
+default-false `allow_usb2_current` experiment can select bounded100/500mA plans;
+see [its exact source, tests and limits](USB2_CURRENT.md). The legacy route
+keeps its conservative experimental input>=1000mA restriction. This is
 not proof that iOS cannot trickle-charge from 500 mA. No external charger/accessory
 permission implementation is fabricated to bypass that limit.
 

@@ -1,11 +1,11 @@
 {
-  "scope": "isolated default-disabled source/gauge integration, bounded work/IRQ/fault lifetime and drained atomic source invalidation",
+  "scope": "isolated default-disabled source/gauge integration, bounded work/IRQ/fault lifetime and drained atomic source invalidation; further default-false owned USB2 nominal-current selection",
   "linux_commit": "adc218676eef25575469234709c2d87185ca223a",
   "core_identical_to_v2": true,
   "historical_v3_source_sha256": "a8a7787b0241169d6b914f84c140c177aab13fd1ac88ee9a2ce4b03845409c25",
   "normal_config_sha256": "8b59b75e728cfacfb3441adf08b4de6e38c4ca53788fcee039ddddfdc43bed20",
   "files": {
-    "apple-d1946-current-only.c": "05f224e663c9f7ffffb72d83e8bd360439134d4938e5553bf1c35484533d9035",
+    "apple-d1946-current-only.c": "eae946c7491c2e70412ff383e62c6efa4e86d6665025155b0a09fe3965444a55",
     "d1946-current-core.c": "720193afcdc7a507d7d9f16a02629fddae33106f366038eb05c2107fca4bc60c",
     "d1946-current-core.h": "513041d6f22b830b1ff0835acfbd7a51eaf830d3e6f2bd3766153bd6313c746e",
     "d1946-current-provider.h": "c63137a6ee30b039e8c321dbaf2e0736a05fcded4eec90264d4cc7f090a9521e",

@@ -37,6 +37,13 @@ MODULE_PARM_DESC(
 /* Explicit opt-in to the separately reviewed, real USB2/gauge producer.
  * Still gated by both inherited-state experiment assertions; no DT is supplied. */
 static bool owned_usb2_source;
+/* Further opt-in experiment only; no physical charging or analog protection
+ * guarantee follows from software current/profile evidence. */
+static bool allow_usb2_current;
+module_param(allow_usb2_current, bool, 0444);
+MODULE_PARM_DESC(
+	allow_usb2_current,
+	"Experimental owned USB2 current plan; requires every existing retention/source/gauge assertion");
 module_param(owned_usb2_source, bool, 0444);
 MODULE_PARM_DESC(
 	owned_usb2_source,
@@ -266,6 +273,29 @@ static unsigned int d_decoded_input(unsigned int ma)
 		return ma;
 	}
 }
+static unsigned int d_charge_for_input(struct d1946_current *d,
+				       unsigned int input,
+				       unsigned int budget_ua)
+{
+	unsigned int charge;
+	if (owned_usb2_source) {
+		/* The actual owned producer only publishes completed USB2 <=500mA.
+		 * No USB pre-configuration or accessory permission is inferred here. */
+		if (!allow_usb2_current || !input || input > 500 ||
+		    budget_ua > 500000)
+			return 0;
+		charge = min(min(d->requested_charge, D_EXPERIMENT_MAX_MA),
+			     input);
+	} else {
+		/* Keep the existing legacy-provider experiment restriction. */
+		if (input < 1000)
+			return 0;
+		charge = min(d->requested_charge, D_EXPERIMENT_MAX_MA);
+	}
+	/* Actual D1946 setters floor to 40mA codes. Keep both zero thermal caps;
+	 * their physical temperature/source bucket identities remain unknown. */
+	return charge / 40 * 40;
+}
 static void d_worker(struct work_struct *work)
 {
 	struct d1946_current *d =
@@ -312,10 +342,7 @@ static void d_worker(struct work_struct *work)
 					     snapshot.budget_ua / 1000,
 					     d->requested_input);
 		input = d_profile_floor(min_t(unsigned int, maximum, 2100));
-		/* Conservative experiment restriction, NOT proof that 500mA
-                 * USB inputs cannot trickle-charge under iOS. */
-		if (input >= 1000)
-			charge = min(d->requested_charge, D_EXPERIMENT_MAX_MA);
+		charge = d_charge_for_input(d, input, snapshot.budget_ua);
 	}
 	/* A fresh unchanged plan needs only status/permission validation. Avoid
 	 * repeatedly toggling the charger on every 100ms telemetry poll. */
