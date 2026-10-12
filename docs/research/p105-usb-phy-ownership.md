@@ -83,8 +83,14 @@ static slot `+0x174`, PHY `+0x34c(0)` if retained, then `+0x478`. Cleanup at
 `0x80c904fc` checks the counter under the lock before freeing it and releasing
 the retained PHY. It does not demonstrate an external VBUS-off callback.
 
-Synopsys transition wrappers around inherited controller transitions have
-additional order constraints:
+The S5L **EHCI** subclass transition wrappers around inherited controller
+transitions have additional order constraints. Actual 12H321 prelink metadata
+places these addresses in `com.apple.driver.AppleS5L8930XUSBEHCI` at
+`0x80c96000..0x80c99000`, with IOKit class `AppleS5L8930XUSBEHCI` matching
+`usb-synopsys_ehci,s5l8930x`. "Synopsys" here refers to that EHCI subclass,
+not the DWC2/OTG device controller. `AppleSynopsysOTGDevice` is a separate
+prelinked image at `0x80bb4000..0x80bc3000`, matching
+`usb-device,s5l8900x`. These EHCI transition orders are not an OTG recipe:
 
 | Wrapper/input | Verified call order | Return/error boundary |
 |---|---|---|
