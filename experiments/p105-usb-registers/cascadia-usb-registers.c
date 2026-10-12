@@ -53,9 +53,15 @@ static int prerequisites(struct cascadia_usb_registers *r,
 
 static int fault(struct cascadia_usb_registers *r, int ret)
 {
+	unsigned int i;
+
 	if (ret > 0)
 		ret = -EIO;
-	if (r->touched) {
+	/* A ready gate may commit membership without any local write. */
+	for (i = 0; i < CASCADIA_USB_CLOCK_OWNERS; i++)
+		if (r->masks[i])
+			break;
+	if (r->touched || i < CASCADIA_USB_CLOCK_OWNERS) {
 		r->fault = true;
 		r->fault_error = ret;
 	}

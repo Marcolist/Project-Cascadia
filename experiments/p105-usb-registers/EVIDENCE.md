@@ -87,7 +87,7 @@ must serialize quiesce, policy and epoch changes across all consumers; this
 mutex does not implement the missing physical connector lifetime.
 
 Membership changes commit only after all checked operations succeed. A failed
-write may have touched hardware. Once touched, any error latches its original
+write may have touched hardware. Once touched or holding any membership, any error latches its original
 negative error, preserves the old owner masks and records the pending target.
 Further calls refuse I/O; no automatic rollback, reset, force success or
 substitution of a new connector epoch occurs. Recovery/disposition of that
@@ -97,8 +97,8 @@ membership or fault. Fresh zeroed storage is required.
 
 This primitive returns only completion of its own operations. It does not
 claim voltage, current permission, authentication, controller publication,
-mux route completion or device enumeration. A failed provider/read prior to
-any hardware touch leaves no phantom owner commit; late errors retain fault.
+mux route completion or device enumeration. A failed provider/read before any hardware touch and with no retained
+membership leaves no phantom owner commit; late/retained-state errors latch.
 
 ## First concrete external-host path
 
@@ -155,9 +155,10 @@ The original candidate rejected an epoch-validation failure at the next API
 entry without latching it, even after successful writes and retained masks.
 Restoring the fake validator could silently reuse that uncertain context.
 Entry validation now uses the same fault policy as transaction failures: once
-hardware was touched, validator errors (including a vanished validator) latch
+hardware was touched or membership was retained, validator errors (including a vanished validator) latch
 and preserve masks; no additional I/O occurs and a later good callback cannot
-clear the fault. Before any touch, a rejected admission remains retryable.
+clear the fault. Before any touch and without retained membership, a rejected admission remains
+retryable.
 A malformed caller epoch is conservatively rejected/latches if state was retained;
 this component has no independently bound per-owner epoch object that could
 prove an innocent stale argument. Such an adapter remains necessary.
@@ -168,3 +169,24 @@ normalization, missing-validator and pre-touch retry cases execute actual C.
 All16 register test groups pass with UBSan. The unchanged old entry-validation
 function fails the same retained-state regression test; its failure is retained
 privately as a negative control. No runtime or DT hook was introduced.
+
+
+## Successful membership without a local register write
+
+A supported low-gate acquisition may find target/ack already ready. The actual
+API then commits its identity mask after checked reads without a write, leaving
+touched=false. Fault retention now scans all16 masks; retained ownership does
+not depend on whether this backend wrote the register. Restoring a lost validator
+or attachment epoch cannot reuse this context. Positive validator errors retain
+the normalized EIO; empty untouched contexts keep initial admission/retry behavior.
+
+An independent read-only source review confirms this ordinary API path; no
+manual bitmap adoption is needed. Forty-eight actual historical controls and54
+fixed/cold sanitizer cases cover four low gates, owner slots1/15, missing/error/
+positive validators, membership and tuning callers, zero-I/O fault retention and
+empty recovery. The previous complete source is reconstructed from its pinned
+actual fault function and matches its historical hash. Registers/epochs and
+ready gate observations are explicit synthetic providers. No physical gate,
+USB, PHY, WLAN, VBUS, iPad or running kernel is tested. Repeat:
+
+    python3 tests/test-usb-register-no-write-retention.py
