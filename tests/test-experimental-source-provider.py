@@ -1,7 +1,7 @@
 from pathlib import Path
-import hashlib, json, os, re, shutil, subprocess, tempfile, unittest
+import hashlib,json,os,re,shutil,subprocess,tempfile,unittest
 ROOT = Path(__file__).resolve().parents[1] / 'experiments/p105-source'
-HDQ = ROOT / 'apple-hdq-battery.c'
+HDQ = Path(os.environ.get('CASCADIA_TEST_HDQ_READER', str(ROOT / 'apple-hdq-battery.c')))
 LINUX = Path(os.environ.get('CASCADIA_TEST_LINUX', str(Path(__file__).resolve().parents[1] / 'build/linux')))
 
 
@@ -60,6 +60,14 @@ typedef uint8_t u8; typedef uint16_t u16; typedef int16_t s16; typedef uint64_t 
 #define min(a,b) ((a)<(b)?(a):(b))
 #define time_before(a,b) ((long)((b)-(a))>0)
 #define dev_warn_ratelimited(...) ((void)0)
+struct notifier_block {int (*notifier_call)(struct notifier_block *,unsigned long,void *);struct notifier_block *next;};
+struct atomic_notifier_head {struct notifier_block *head;};
+#define NOTIFY_OK 1
+#define container_of(ptr,type,member) ((type*)((char*)(ptr)-__builtin_offsetof(type,member)))
+#define ATOMIC_INIT_NOTIFIER_HEAD(h) ((h)->head=NULL)
+static int atomic_notifier_chain_register(struct atomic_notifier_head *h,struct notifier_block *n){n->next=h->head;h->head=n;return 0;}
+static int atomic_notifier_chain_unregister(struct atomic_notifier_head *h,struct notifier_block *n){struct notifier_block **it=&h->head;while(*it&&*it!=n)it=&(*it)->next;assert(*it==n);*it=n->next;n->next=NULL;return 0;}
+static int atomic_notifier_call_chain(struct atomic_notifier_head *h,unsigned long reason,void *v){for(struct notifier_block *n=h->head;n;n=n->next)assert(n->notifier_call(n,reason,v)==NOTIFY_OK);return NOTIFY_OK;}
 typedef struct {int locked;} spinlock_t;
 struct mutex {int locked;};
 static void spin_lock_init(spinlock_t *l){l->locked=0;}

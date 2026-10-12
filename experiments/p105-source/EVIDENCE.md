@@ -173,3 +173,7 @@ callbacks only; automatic input-supply, probe, DT and charger binding are absent
 Apply-order for a future disposable source review is observer hooks, then source
 reader hooks, first placing the supplied observer-base C/H in the disposable
 DWC2 tree. The resulting observer C/H must equal the supplied updated versions; this is not a boot recipe.
+
+Owned source invalidation now reaches the frontend through registered and
+synchronously drained atomic notifiers; see [the concrete path and limits](NOTIFICATIONS.md).
+No PMU I/O occurs in callbacks; physical shutdown deadlines remain unverified.

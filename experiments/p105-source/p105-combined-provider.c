@@ -5,6 +5,7 @@
  * cap, descriptor increase or1000mA source-detection threshold is introduced.
  */
 #include <linux/module.h>
+#include <linux/notifier.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <linux/ktime.h>
@@ -15,6 +16,9 @@
 #include "p105-combined-provider.h"
 struct p105_combined_provider {
 	spinlock_t lock;
+	struct atomic_notifier_head changes;
+	struct notifier_block source_notifier;
+	struct notifier_block *subscription;
 	bool dead, valid;
 	u64 serial;
 	struct p105_dwc2_source_reader *source;
@@ -25,6 +29,22 @@ struct p105_combined_provider {
 	struct d1946_snapshot published;
 	struct d1946_current_provider ops;
 };
+/* Runs atomically under controller/observer locks: only revoke and schedule.
+ * No gauge read, PMU write or recursive source capture is allowed here. */
+static int p105_source_changed(struct notifier_block *nb, unsigned long reason,
+			       void *unused)
+{
+	struct p105_combined_provider *p = container_of(
+		nb, struct p105_combined_provider, source_notifier);
+	unsigned long flags;
+	(void)unused;
+	spin_lock_irqsave(&p->lock, flags);
+	p->valid = false;
+	p->serial++;
+	spin_unlock_irqrestore(&p->lock, flags);
+	atomic_notifier_call_chain(&p->changes, reason, NULL);
+	return NOTIFY_OK;
+}
 static bool p105_same_source(const struct p105_usb_source_sample *a,
 			     const struct p105_usb_source_sample *b)
 {
@@ -161,6 +181,8 @@ p105_combined_provider_open(struct device *consumer, struct device *source,
 		return ERR_PTR(-ENOMEM);
 	}
 	spin_lock_init(&p->lock);
+	ATOMIC_INIT_NOTIFIER_HEAD(&p->changes);
+	p->source_notifier.notifier_call = p105_source_changed;
 	p->source = p105_dwc2_source_open(consumer, source);
 	if (IS_ERR(p->source)) {
 		ret = PTR_ERR(p->source);
@@ -169,6 +191,11 @@ p105_combined_provider_open(struct device *consumer, struct device *source,
 	p->gauge = apple_hdq_reader_open(consumer, battery);
 	if (IS_ERR(p->gauge)) {
 		ret = PTR_ERR(p->gauge);
+		goto close_source;
+	}
+	ret = p105_dwc2_source_register(p->source, &p->source_notifier);
+	if (ret) {
+		apple_hdq_reader_close(p->gauge);
 		goto close_source;
 	}
 	p->battery_identity = battery;
@@ -191,6 +218,8 @@ void p105_combined_provider_close(struct p105_combined_provider *p)
 	unsigned long flags;
 	if (!p || IS_ERR(p))
 		return;
+	p105_combined_provider_unregister(p);
+	p105_dwc2_source_unregister(p->source);
 	/* Caller already stopped/drained every callback; no close/read race allowed. */
 	spin_lock_irqsave(&p->lock, flags);
 	p->dead = true;
@@ -212,3 +241,28 @@ EXPORT_SYMBOL_GPL(p105_combined_provider_ops);
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION(
 	"Private P105 USB2 protocol/gauge snapshot provider candidate");
+
+/* One caller-owned listener. Probe/remove serialization is required; unregister
+ * may sleep waiting for RCU and cannot be called from a notifier callback. */
+int p105_combined_provider_register(struct p105_combined_provider *p,
+				    struct notifier_block *nb)
+{
+	int ret;
+	if (!p || IS_ERR(p) || READ_ONCE(p->dead) || !nb || !nb->notifier_call)
+		return -EINVAL;
+	if (p->subscription)
+		return -EBUSY;
+	ret = atomic_notifier_chain_register(&p->changes, nb);
+	if (!ret)
+		p->subscription = nb;
+	return ret;
+}
+EXPORT_SYMBOL_GPL(p105_combined_provider_register);
+void p105_combined_provider_unregister(struct p105_combined_provider *p)
+{
+	if (!p || IS_ERR(p) || !p->subscription)
+		return;
+	atomic_notifier_chain_unregister(&p->changes, p->subscription);
+	p->subscription = NULL;
+}
+EXPORT_SYMBOL_GPL(p105_combined_provider_unregister);

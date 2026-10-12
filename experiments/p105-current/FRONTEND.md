@@ -1,4 +1,4 @@
-# Isolated current frontend v4: actual owned source/gauge integration
+# Isolated current frontend v5: actual owned source/gauge integration
 
 This is an offline Linux C candidate. It is not installed, enabled, loaded, or
 wired to a DT node. The Kconfig default and all three experiment parameters are
@@ -49,16 +49,18 @@ property write before `ready=true` now returns `-EAGAIN`, preventing the brief
 power_supply-registration window from activating IRQs while probe is unfinished.
 
 Neither route registers an `external_power_changed` callback into a foreign
-supplier's workqueue. Both poll their validated producer and receive their
-existing raw PMU source events. Cancellation of this supply's own changed_work
+supplier's workqueue. The owned route also registers a drained atomic USB-source notification; both
+retain polling and their existing raw PMU source events. Cancellation of this supply's own changed_work
 cannot drain an unrelated supplier's callback that already holds a class-device
 reference; that reference also does not preserve this frontend's devm context.
 The unsafe callback is removed, not merely guarded after entering freed context.
 The same actual descriptor constructor is tested with both route selectors.
 
-This does **not** provide immediate UDC-to-PMU shutdown on USB suspend; a
-separately owned and quiesced invalidation notification path remains needed
-before runtime use that requires that timing guarantee. Validation rejects
+The owned observer now propagates USB suspend/reset/disconnect/configuration
+invalidation directly to the frontend epoch and urgent work queue. Stop fences
+queueing and drains this registered notifier before IRQ/work/handle teardown.
+See [notifications](../p105-source/NOTIFICATIONS.md). This does **not** prove
+immediate physical UDC-to-PMU shutdown or a USB electrical timing deadline. Validation rejects
 observed source invalidation before/after every enable attempt; the existing
 100 ms poll is not instantaneous physical cutoff. Removing the legacy callback
 can change notification latency, which is explicit rather than called equivalent.
@@ -80,7 +82,8 @@ The actual release ordering is:
 
 1. Serialize against property activation with `lifecycle_lock`; publish the
    queue/epoch fence under `queue_lock`.
-2. Disable the activated, exclusively owned parent IRQ where necessary.
+2. Drain the owned combined-provider notifier in process context, outside
+   spinlocks. Disable the activated, exclusively owned parent IRQ where necessary.
    `synchronize_irq()` drains **every registered** parent action, including the
    `parent_failed` path that used `disable_irq_nosync()` in its own thread.
 3. `cancel_delayed_work_sync()` drains the worker. Future queue attempts are
@@ -162,12 +165,14 @@ the five actual-C groups in `../p105-source`.
   fails the same no-requeue assertion on the second worker iteration. The child
   core-dump limit is zero, and the historical code is never built into the module.
 
-All twelve local tests PASS. Missing GCC explicitly skips. ARMv7 object builds
+All twelve retained core/PM/lifecycle/fault tests and five source-notification
+tests PASS. Missing GCC explicitly skips. ARMv7 object builds
 against real Linux 6.12 headers with `W=1` PASS with no compiler warnings for both
 reachable and unavailable provider branches (`arm-frontend-owned-v4.log` and
-`arm-frontend-unavailable-v4.log`). Owned-branch `nm` shows the actual three
-combined-provider calls and `synchronize_irq`; the unavailable branch has no
-combined symbols. `make prepare` explicitly refreshed the isolated generated
+`arm-frontend-unavailable-v4.log`). The earlier v4 owned-branch `nm` shows its three combined-provider calls and
+`synchronize_irq`; the unavailable branch has no combined symbols. The v5
+notification group additionally ARM-compiles both branches and the actual
+register/unregister calls; see its separate [validation](../p105-source/NOTIFICATIONS.md). `make prepare` explicitly refreshed the isolated generated
 config before each branch: `olddefconfig` alone is not sufficient for an external
 M= object build to consume fresh generated macros. The existing container UID
 `whoami` diagnostic is unrelated to compiler warnings. No module was linked,
@@ -190,8 +195,8 @@ nonzero charging, so this owned USB2-only path will not enable charging. This is
 not proof that iOS cannot trickle-charge from 500 mA. No external charger/accessory
 permission implementation is fabricated to bypass that limit.
 
-Full CV/termination/fault protection and inherited analog retention, immediate
-source/suspend cutoff, complete event ownership and physical calibration remain
+Full CV/termination/fault protection and inherited analog retention, physical
+source/suspend cutoff timing, complete event ownership and calibration remain
 independent requirements before any runtime activation. The producer integration
 and compile/test results are evidence for software ownership and transactions;
 they do not prove electrical or battery safety or that charging works on hardware.

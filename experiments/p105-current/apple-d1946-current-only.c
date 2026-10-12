@@ -4,6 +4,7 @@
  * No CV, termination, OTP, watchdog or analog-fault initialization is invented.
  */
 #include <linux/module.h>
+#include <linux/notifier.h>
 #include <linux/platform_device.h>
 #include <linux/of.h>
 #include <linux/interrupt.h>
@@ -53,6 +54,7 @@ struct d1946_current {
 	spinlock_t queue_lock;
 	const struct d1946_current_provider *provider;
 	struct p105_combined_provider *owned_provider;
+	struct notifier_block owned_source_notifier;
 	struct platform_device *source_pdev;
 	struct irq_chip chip;
 	struct irq_domain *domain;
@@ -102,6 +104,18 @@ static void d_invalidate(struct d1946_current *d)
 	atomic_inc(&d->epoch);
 	d_queue(d, 0, true);
 }
+#if IS_REACHABLE(CONFIG_P105_COMBINED_CURRENT_PROVIDER)
+static int d_owned_source_changed(struct notifier_block *nb,
+				  unsigned long reason, void *unused)
+{
+	struct d1946_current *d =
+		container_of(nb, struct d1946_current, owned_source_notifier);
+	(void)reason;
+	(void)unused;
+	d_invalidate(d);
+	return NOTIFY_OK;
+}
+#endif
 /* io_lock held. A fault never silently restores permission after a good read. */
 static void d_fault(struct d1946_current *d)
 {
@@ -487,6 +501,12 @@ static int d_stop(struct d1946_current *d)
 	WRITE_ONCE(d->ready, false);
 	atomic_inc(&d->epoch);
 	spin_unlock_irqrestore(&d->queue_lock, flags);
+#if IS_REACHABLE(CONFIG_P105_COMBINED_CURRENT_PROVIDER)
+	/* Stop fence is visible before RCU drain; no callback can enqueue after
+	 * cancel. Never wait RCU while holding queue/io/controller spinlocks. */
+	if (d->owned_provider)
+		p105_combined_provider_unregister(d->owned_provider);
+#endif
 	if (d->parent_enabled && !READ_ONCE(d->parent_failed))
 		disable_irq(d->parent_irq);
 	/* parent_failed may have used disable_irq_nosync() in its own thread.
@@ -634,6 +654,11 @@ static int d_providers_acquire(struct d1946_current *d)
 			d->owned_provider = NULL;
 			return ret;
 		}
+		d->owned_source_notifier.notifier_call = d_owned_source_changed;
+		ret = p105_combined_provider_register(
+			d->owned_provider, &d->owned_source_notifier);
+		if (ret)
+			return ret;
 		d->provider = p105_combined_provider_ops(d->owned_provider);
 		if (!d->provider || !d->provider->snapshot ||
 		    !d->provider->valid)

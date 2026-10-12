@@ -17,6 +17,7 @@ class PM(unittest.TestCase):
 #define main core_original_main
 #include "core-fixture.c"
 #undef main
+#define IS_REACHABLE(x) 0
 #define READ_ONCE(x) (x)
 #define WRITE_ONCE(x,v) ((x)=(v))
 #define dev_err(d,...) ((void)(d))

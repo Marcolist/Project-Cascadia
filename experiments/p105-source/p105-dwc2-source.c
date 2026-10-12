@@ -14,6 +14,7 @@ struct p105_dwc2_source_reader {
 	struct device *consumer, *supplier;
 	struct device_link *link;
 	struct dwc2_hsotg *context;
+	struct notifier_block *subscription;
 };
 static bool p105_source_usable(const struct p105_dwc2_source_reader *r)
 {
@@ -74,6 +75,7 @@ void p105_dwc2_source_close(struct p105_dwc2_source_reader *r)
 {
 	if (!r || IS_ERR(r))
 		return;
+	p105_dwc2_source_unregister(r);
 	put_device(r->supplier);
 	put_device(r->consumer);
 	kfree(r);
@@ -158,3 +160,29 @@ bool p105_dwc2_source_valid(struct p105_dwc2_source_reader *r,
 	return valid;
 }
 EXPORT_SYMBOL_GPL(p105_dwc2_source_valid);
+
+int p105_dwc2_source_register(struct p105_dwc2_source_reader *r,
+			      struct notifier_block *nb)
+{
+	int ret;
+	if (!nb || !nb->notifier_call || !p105_source_usable(r))
+		return -ENODEV;
+	if (r->subscription)
+		return -EBUSY;
+	ret = p105_udc_observer_register(&r->context->p105_power_observer, nb);
+	if (!ret)
+		r->subscription = nb;
+	return ret;
+}
+EXPORT_SYMBOL_GPL(p105_dwc2_source_register);
+void p105_dwc2_source_unregister(struct p105_dwc2_source_reader *r)
+{
+	if (!r || !r->subscription)
+		return;
+	/* The managed supplier link preserves context until consumer teardown.
+	 * Do not test bound status here: teardown must drain even after unbind starts. */
+	p105_udc_observer_unregister(&r->context->p105_power_observer,
+				     r->subscription);
+	r->subscription = NULL;
+}
+EXPORT_SYMBOL_GPL(p105_dwc2_source_unregister);

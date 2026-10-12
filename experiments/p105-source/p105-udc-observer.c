@@ -6,6 +6,7 @@ void p105_udc_observer_init(struct p105_udc_observer *o)
 {
 	memset(o, 0, sizeof(*o));
 	spin_lock_init(&o->lock);
+	ATOMIC_INIT_NOTIFIER_HEAD(&o->changes);
 	o->seen.generation = 1;
 	o->seen.uncertain = true;
 }
@@ -20,6 +21,7 @@ static void p105_finish(struct p105_udc_observer *o)
 	o->seen.completed_draw_seen = o->pending_draw_seen;
 	o->seen.completed = true;
 	o->seen.uncertain = false;
+	atomic_notifier_call_chain(&o->changes, 0, NULL);
 	o->seen.pending = false;
 }
 u64 p105_udc_setup_begin(struct p105_udc_observer *o, bool configuration,
@@ -32,6 +34,7 @@ u64 p105_udc_setup_begin(struct p105_udc_observer *o, bool configuration,
 		o->seen.generation++;
 		o->seen.completed = false;
 		o->seen.uncertain = true;
+		atomic_notifier_call_chain(&o->changes, 0, NULL);
 	}
 	o->seen.pending = configuration;
 	o->seen.setup_ok = false;
@@ -106,6 +109,7 @@ void p105_udc_invalidate(struct p105_udc_observer *o, unsigned int reason)
 	o->seen.completed = false;
 	o->seen.uncertain = true;
 	o->seen.invalidation_reason = reason;
+	atomic_notifier_call_chain(&o->changes, reason, NULL);
 	spin_unlock_irqrestore(&o->lock, flags);
 }
 void p105_udc_observer_read(struct p105_udc_observer *o,
@@ -126,4 +130,18 @@ bool p105_udc_observer_try_read(struct p105_udc_observer *o,
 	*out = o->seen;
 	spin_unlock_irqrestore(&o->lock, flags);
 	return true;
+}
+
+/* Register/unregister only in process context. Callbacks run under observer and
+ * often controller locks with IRQs disabled: no snapshot, I/O, sleep or recursive
+ * observer access. Unregister waits RCU before caller destroys its callback. */
+int p105_udc_observer_register(struct p105_udc_observer *o,
+			       struct notifier_block *nb)
+{
+	return atomic_notifier_chain_register(&o->changes, nb);
+}
+int p105_udc_observer_unregister(struct p105_udc_observer *o,
+				 struct notifier_block *nb)
+{
+	return atomic_notifier_chain_unregister(&o->changes, nb);
 }

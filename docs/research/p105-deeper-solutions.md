@@ -61,8 +61,10 @@ The current frontend now has a default-false owned USB2 route with actual platfo
 and battery references, constructing the combined provider before any PMU read.
 No dummy input supply is used. Queue/stop fencing, parent IRQ synchronization,
 foreign callback removal and a fault self-requeue loop are repaired and tested
-with actual functions, including a deterministic pthread interleaving. Immediate
-UDC-to-PMU cutoff and physical analog safety remain open. Its conservative1000mA
+with actual functions, including a deterministic pthread interleaving. An owned atomic notifier chain now propagates actual UDC invalidations directly
+to the frontend epoch and urgent worker, with RCU callback drains before teardown.
+Five actual-C notifier tests include deterministic stop/close races and the
+historical stop failure. Physical cutoff timing and analog safety remain open. Its conservative1000mA
 charge restriction means this USB2<=500mA route does not enable charging. No DT,
 DWC2 patch, boot change or runtime activation is supplied.
 

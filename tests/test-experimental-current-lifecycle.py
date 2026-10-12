@@ -55,13 +55,16 @@ struct power_supply_desc {
 };
 union power_supply_propval {int intval;};
 struct d1946_current_provider {int(*snapshot)(void);bool(*valid)(void);};
-struct p105_combined_provider {const struct d1946_current_provider *ops;};
+struct notifier_block {int(*notifier_call)(struct notifier_block *,unsigned long,void *);};
+#define NOTIFY_OK 1
+#define container_of(ptr,type,member) ((type*)((char*)(ptr)-__builtin_offsetof(type,member)))
+struct p105_combined_provider {const struct d1946_current_provider *ops;struct notifier_block *subscription;};
 #define D_NBANKS 9
 static const unsigned int source_events[]={3,4,52};
 struct d1946_current {
  struct mutex lifecycle_lock,io_lock,bus_lock;spinlock_t queue_lock;
  struct device *dev;struct d1946_io io;
- const struct d1946_current_provider *provider;struct p105_combined_provider *owned_provider;
+ const struct d1946_current_provider *provider;struct p105_combined_provider *owned_provider;struct notifier_block owned_source_notifier;
  struct platform_device *source_pdev;struct power_supply *input,*battery,*psy;
  bool ready,stopping,events_enabled,fault_latched,parent_enabled,parent_failed,applied_valid,status_valid;
  int parent_irq,stop_error,work,virq[3];unsigned int epoch,requested_input,requested_charge;struct power_supply_desc desc;void *domain;u8 ceiling,owned[9],boot_masks[9];
@@ -74,7 +77,7 @@ static struct power_supply battery,input;
 static int no_snapshot(void){return -EOPNOTSUPP;}
 static bool no_valid(void){return false;}
 static const struct d1946_current_provider ops={no_snapshot,no_valid};
-static struct p105_combined_provider combined={&ops};
+static struct p105_combined_provider combined={.ops=&ops};
 static bool missing_battery,missing_node,missing_source,null_battery,null_input;
 static int factory_error;static unsigned int input_lookups,battery_lookups,factory_calls,closes;
 static unsigned int synchronizes,cancels,disables,freed_children,freed_parent,domain_removes,unregisters;
@@ -115,10 +118,12 @@ static void put_device(struct device *d){assert(d->refs);d->refs--;}
 /* Explicit factory ownership mock only. No positive budget/permission exists;
  * actual source/gauge factory and grant chain are tested in the separate group. */
 static struct p105_combined_provider *p105_combined_provider_open(struct device *c,struct device *s,struct power_supply *b){assert(c==&dev&&s==&source.dev&&b==&battery);factory_calls++;return factory_error?ERR_PTR(factory_error):&combined;}
+static int p105_combined_provider_register(struct p105_combined_provider *p,struct notifier_block *nb){assert(p==&combined&&!p->subscription&&nb->notifier_call);p->subscription=nb;return 0;}
+static void p105_combined_provider_unregister(struct p105_combined_provider *p){assert(p==&combined);p->subscription=NULL;}
 static const struct d1946_current_provider *p105_combined_provider_ops(struct p105_combined_provider *p){assert(p==&combined);return p->ops;}
-static void p105_combined_provider_close(struct p105_combined_provider *p){assert(p==&combined&&!pending);assert(!READ_ONCE(((struct d1946_current *)dev.platform_data)->ready));closes++;close_seq=++sequence;}
+static void p105_combined_provider_close(struct p105_combined_provider *p){assert(p==&combined&&!pending&&!p->subscription);assert(!READ_ONCE(((struct d1946_current *)dev.platform_data)->ready));closes++;close_seq=++sequence;}
 '''
-  for name in ['d_queue','d_invalidate','d_stop','d_release','d_providers_acquire','d_set']:c+=function(src,name)+'\n'
+  for name in ['d_queue','d_invalidate','d_owned_source_changed','d_stop','d_release','d_providers_acquire','d_set']:c+=function(src,name)+'\n'
   c+=r'''
 static const enum power_supply_property d_properties[]={POWER_SUPPLY_PROP_STATUS,POWER_SUPPLY_PROP_HEALTH,POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT};
 static const char *dev_name(struct device *d){assert(d==&dev);return "experiment";}

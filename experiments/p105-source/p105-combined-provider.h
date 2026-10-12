@@ -2,6 +2,7 @@
 #ifndef P105_COMBINED_PROVIDER_H
 #define P105_COMBINED_PROVIDER_H
 struct device;
+struct notifier_block;
 struct power_supply;
 struct d1946_current_provider;
 struct p105_combined_provider;
@@ -13,6 +14,9 @@ struct p105_combined_provider;
 struct p105_combined_provider *
 p105_combined_provider_open(struct device *, struct device *,
 			    struct power_supply *);
+int p105_combined_provider_register(struct p105_combined_provider *,
+				    struct notifier_block *);
+void p105_combined_provider_unregister(struct p105_combined_provider *);
 void p105_combined_provider_close(struct p105_combined_provider *);
 const struct d1946_current_provider *
 p105_combined_provider_ops(struct p105_combined_provider *);
