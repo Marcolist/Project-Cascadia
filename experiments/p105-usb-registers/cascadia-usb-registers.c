@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* Private, default-off P105 register primitives. See DESIGN.md for limits. */
+/* Default-off P105 register primitives. See EVIDENCE.md for limits. */
 #include <linux/delay.h>
 #include <linux/errno.h>
+#include <linux/err.h>
 #include <linux/regmap.h>
 #include "cascadia-usb-registers.h"
 
@@ -32,16 +33,22 @@ static int checked_epoch(struct cascadia_usb_registers *r,
 	return ret > 0 ? -EIO : ret;
 }
 
+static int fault(struct cascadia_usb_registers *r, int ret);
+
 static int prerequisites(struct cascadia_usb_registers *r,
 	unsigned int owner, u64 epoch)
 {
+	int ret;
+
 	if (!r->initialized || owner >= CASCADIA_USB_CLOCK_OWNERS)
 		return -EINVAL;
 	if (r->fault)
 		return r->fault_error;
 	if (!r->permitted || !r->complete_clock_ownership)
 		return -EACCES;
-	return checked_epoch(r, owner, epoch);
+	ret = checked_epoch(r, owner, epoch);
+	/* Failed validation cannot forget retained physical ownership. */
+	return ret ? fault(r, ret) : 0;
 }
 
 static int fault(struct cascadia_usb_registers *r, int ret)
@@ -126,7 +133,8 @@ static int gate(struct cascadia_usb_registers *r,
 int cascadia_usb_registers_init(struct cascadia_usb_registers *r,
 	struct regmap *complex, struct regmap *pmgr, struct regmap *phy)
 {
-	if (!r || !complex || !pmgr || !phy)
+	if (!r || IS_ERR_OR_NULL(complex) || IS_ERR_OR_NULL(pmgr) ||
+	    IS_ERR_OR_NULL(phy))
 		return -EINVAL;
 	if (r->initialized)
 		return -EALREADY;

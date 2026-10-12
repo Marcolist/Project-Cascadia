@@ -148,3 +148,23 @@ Portable tests use the normalized semantic oracle rather than reading firmware.
 Run `python3 tests/test-experimental-usb-registers.py`. Fakes replace Regmap,
 mutex and delays; actual Linux regmap code is compiled unchanged. This directory
 is not included by normal Kconfig, Makefiles, DT or build wrappers.
+
+## Retained-ownership validation correction
+
+The original candidate rejected an epoch-validation failure at the next API
+entry without latching it, even after successful writes and retained masks.
+Restoring the fake validator could silently reuse that uncertain context.
+Entry validation now uses the same fault policy as transaction failures: once
+hardware was touched, validator errors (including a vanished validator) latch
+and preserve masks; no additional I/O occurs and a later good callback cannot
+clear the fault. Before any touch, a rejected admission remains retryable.
+A malformed caller epoch is conservatively rejected/latches if state was retained;
+this component has no independently bound per-owner epoch object that could
+prove an innocent stale argument. Such an adapter remains necessary.
+
+Initialization also rejects NULL and kernel ERR_PTR regmap handles before
+publishing initialized state. Six handle cases, retained-error/positive-error
+normalization, missing-validator and pre-touch retry cases execute actual C.
+All16 register test groups pass with UBSan. The unchanged old entry-validation
+function fails the same retained-state regression test; its failure is retained
+privately as a negative control. No runtime or DT hook was introduced.

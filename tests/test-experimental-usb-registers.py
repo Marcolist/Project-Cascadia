@@ -6,7 +6,7 @@ class Registers(unittest.TestCase):
  @classmethod
  def setUpClass(cls):
   cls.tmp=tempfile.TemporaryDirectory();so=Path(cls.tmp.name)/'candidate.so'
-  subprocess.run(['cc','-shared','-fPIC','-std=gnu11','-Wall','-Wextra','-Werror','-I'+str(HERE/'test-include'),str(HERE/'cascadia-usb-registers.c'),str(HERE/'backend-fixture.c'),'-o',str(so)],check=True)
+  subprocess.run(['cc','-shared','-fPIC','-std=gnu11','-Wall','-Wextra','-Werror','-fsanitize=undefined','-fno-sanitize-recover=all','-I'+str(HERE/'test-include'),str(HERE/'cascadia-usb-registers.c'),str(HERE/'backend-fixture.c'),'-o',str(so)],check=True)
   cls.lib=ctypes.CDLL(str(so));cls.lib.update.argtypes=[ctypes.c_uint,ctypes.c_uint64,ctypes.c_uint];cls.lib.tune.argtypes=[ctypes.c_uint,ctypes.c_uint64,ctypes.c_int,ctypes.c_uint,ctypes.c_int,ctypes.c_int,ctypes.c_int];cls.lib.regvalue.restype=ctypes.c_uint
   cls.oracle=json.loads((HERE/'oracle-register-backend.json').read_text())
   assert cls.oracle['source']['kernelcache_sha256']=='db1ddc8343aa9debc00e0a083fba59d9f555722db60957dc333b854fac21dd2c'
@@ -112,4 +112,37 @@ class Registers(unittest.TestCase):
   self.assertEqual(self.lib.update(1,7,0x30002),0);self.assertEqual(self.lib.regvalue(0,0),0x81202400)
   self.assertEqual(self.lib.tune(1,7,1,4,1,1,1),0)
   self.assertEqual(self.lib.regvalue(2,8),0x90001030);self.assertEqual(self.lib.regvalue(2,0x64),0x8000a400)
+ def test_invalid_regmap_handles_fail_before_initializing(self):
+  self.start()
+  for index in range(3):
+   for errptr in (0,1):
+    self.assertEqual(self.lib.bad_init(index,errptr),-22)
+  self.assertEqual(self.lib.inspect(6,0),0)
+ def test_retained_ownership_validation_failure_cannot_recover_silently(self):
+  for tune in (False,True):
+   for failure in (-116,-19,1):
+    self.start()
+    self.assertEqual(self.lib.update(1,7,0x30002),0)
+    io=self.lib.inspect(6,0)
+    self.lib.inject(5,failure)
+    expected=-5 if failure>0 else failure
+    action=lambda: self.lib.tune(1,7,1,2,1,1,1) if tune else self.lib.update(1,7,0)
+    self.assertEqual(action(),expected)
+    self.assertEqual(self.lib.inspect(5,0),1)
+    self.assertEqual(self.lib.inspect(4,1),0x30002)
+    self.assertEqual(self.lib.inspect(6,0),io)
+    self.lib.inject(5,0)
+    self.assertEqual(action(),expected)
+    self.assertEqual(self.lib.inspect(6,0),io)
+  self.start();self.lib.inject(5,-116)
+  self.assertEqual(self.lib.update(1,7,0x30002),-116)
+  self.assertEqual(self.lib.inspect(5,0),0)
+  self.lib.inject(5,0)
+  self.assertEqual(self.lib.update(1,7,0x30002),0)
+ def test_missing_validator_after_retention_latches_without_io(self):
+  self.start();self.assertEqual(self.lib.update(1,7,0x30002),0)
+  io=self.lib.inspect(6,0);self.lib.inject(4,0)
+  self.assertEqual(self.lib.update(1,7,0),-19)
+  self.assertEqual(self.lib.inspect(5,0),1)
+  self.assertEqual(self.lib.inspect(6,0),io)
 if __name__=='__main__':unittest.main(verbosity=2)

@@ -80,7 +80,7 @@ void inject(int field,int value)
 {
 	switch(field){case 0:fail_io=value;break;case 1:stale_io=value;break;
 	case 2:stale_validate=value;break;case 3:stuck=value;break;
-	case 4:backend.validate_epoch=0;break;default:assert(0);}
+	case 4:backend.validate_epoch=0;break;case 5:epoch_error=value;break;default:assert(0);}
 }
 int reinit(void){return cascadia_usb_registers_init(&backend,&maps[0],&maps[1],&maps[2]);}
 void seed(int map,unsigned int off,unsigned int value)
@@ -90,4 +90,15 @@ void seed(int map,unsigned int off,unsigned int value)
 unsigned int regvalue(int map,unsigned int off)
 {
 	assert(map>=0 && map<3 && !(off&3) && off/4<2048);return maps[map].values[off/4];
+}
+
+int bad_init(int index, int error_pointer)
+{
+	struct cascadia_usb_registers fresh = {0};
+	struct regmap *args[3] = { &maps[0], &maps[1], &maps[2] };
+	assert(index >= 0 && index < 3);
+	args[index] = error_pointer ? (struct regmap *)(long)-5 : 0;
+	int ret = cascadia_usb_registers_init(&fresh, args[0], args[1], args[2]);
+	assert(!fresh.initialized);
+	return ret;
 }
