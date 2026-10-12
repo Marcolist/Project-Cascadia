@@ -84,12 +84,19 @@ nonce, signature, certificate or key bytes.
 
 ## Tests and dependency
 
-Tested host: Python3.12, cryptography41.0.7, OpenSSL3.0.13. `requirements.txt` pins
+The committed suite was independently repeated in an isolated copy-on-write
+image with Python3.10.12, cryptography41.0.7 and its actual OpenSSL3.1.4 backend
+(Python's separate stdlib ssl reports OpenSSL3.0.2). These are distinct library
+versions; the stdlib version does not identify the verification backend.
+`requirements.txt` pins
 cryptography41.0.7; ordinary wheel dependency resolution may also need cffi and
 pycparser. No package is installed by these scripts. The existing Cascadia image
 currently lacks cryptography; do not treat that missing library as a skipped test
 or install it automatically on the production host. Parent may construct a
-separate verified build image for a reproducible suite.
+separate verified build image for a reproducible suite. The repeated suite used
+official binary wheels for cryptography41.0.7, cffi1.17.1 and pycparser2.22,
+each SHA256-checked against PyPI release metadata, with no production-host
+installation or modification to the original Cascadia image.
 
 ```
 python3 test_authcp_verify.py
