@@ -3,3 +3,6 @@
 patches/tree/*.patch -whitespace
 
 tests/fixtures/*.patch -whitespace
+
+# Experimental unified diffs: verify their applied source with strict git apply.
+experiments/**/*.patch -whitespace

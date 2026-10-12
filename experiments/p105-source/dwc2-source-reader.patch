@@ -1,0 +1,77 @@
+--- a/drivers/usb/dwc2/platform.c
++++ b/drivers/usb/dwc2/platform.c
+@@ -21,6 +21,7 @@
+ #include <linux/usb/of.h>
+ 
+ #include "core.h"
++#include "p105-dwc2-source.h"
+ #include "hcd.h"
+ #include "debug.h"
+ 
+@@ -763,3 +764,9 @@
+ };
+ 
+ module_platform_driver(dwc2_platform_driver);
++
++/* Internal same-module identity check for the managed source reader. */
++bool p105_dwc2_matches(struct device *dev)
++{
++ return READ_ONCE(dev->driver) == &dwc2_platform_driver.driver;
++}
+--- a/drivers/usb/dwc2/Makefile
++++ b/drivers/usb/dwc2/Makefile
+@@ -30,3 +30,5 @@
+ 
+ # Private observation-only option, default n.
+ dwc2-$(CONFIG_P105_DWC2_POWER_OBSERVER) += p105-udc-observer.o
++
++dwc2-$(CONFIG_P105_DWC2_SOURCE_READER) += p105-dwc2-source.o
+--- a/drivers/usb/dwc2/Kconfig
++++ b/drivers/usb/dwc2/Kconfig
+@@ -103,3 +103,18 @@
+ 	help
+ 	  Records requested current and completed EP0 configuration transfers.
+ 	  This grants no charging permission and adds no PMU operations.
++
++config P105_DWC2_SOURCE_READER
++	bool "Private P105 fixed-peripheral composite source reader"
++	depends on USB_DWC2=y && USB_LIBCOMPOSITE=y && P105_DWC2_POWER_OBSERVER
++	default n
++	help
++	  USB2 completed-configuration allowance only. No external accessory grant.
++
++config P105_COMBINED_CURRENT_PROVIDER
++	tristate "Private P105 source/gauge current-provider adapter"
++	depends on P105_DWC2_SOURCE_READER && POWER_SUPPLY && BATTERY_APPLE_HDQ
++	default n
++	help
++	  API constructor only; no automatic charger binding or DT is supplied.
++	  Requires the separately reviewed opaque HDQ reader implementation.
+--- a/drivers/usb/dwc2/p105-udc-observer.c
++++ b/drivers/usb/dwc2/p105-udc-observer.c
+@@ -116,3 +116,14 @@
+ 	*out = o->seen;
+ 	spin_unlock_irqrestore(&o->lock, flags);
+ }
++
++bool p105_udc_observer_try_read(struct p105_udc_observer *o,
++				struct p105_udc_observation *out)
++{
++	unsigned long flags;
++	if (!spin_trylock_irqsave(&o->lock, flags))
++		return false;
++	*out = o->seen;
++	spin_unlock_irqrestore(&o->lock, flags);
++	return true;
++}
+--- a/drivers/usb/dwc2/p105-udc-observer.h
++++ b/drivers/usb/dwc2/p105-udc-observer.h
+@@ -36,6 +36,8 @@
+ u64 p105_udc_pending_cookie(struct p105_udc_observer *);
+ void p105_udc_status_complete(struct p105_udc_observer *, u64, int);
+ void p105_udc_invalidate(struct p105_udc_observer *, unsigned int);
++bool p105_udc_observer_try_read(struct p105_udc_observer *,
++				struct p105_udc_observation *);
+ void p105_udc_observer_read(struct p105_udc_observer *,
+ 			    struct p105_udc_observation *);
+ #else
