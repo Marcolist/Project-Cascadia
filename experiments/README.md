@@ -61,3 +61,5 @@ and original staging provenance. Legacy staging paths identify local research
 inputs; the portable tests at `tests/test-experimental-*.py` are the exported
 reproduction entry points. Do not copy a staged component into the runtime
 kernel merely because its offline tests pass.
+
+Additional isolated components: [bank0](p105-bank0/EVIDENCE.md) implements Linux I2C/mutex/atomic transport with a globally owned page-selection cache; [AuthCPAID](p105-authcp-aid/AUTHENTICATION.md) implements a pure version2/3 signature-exchange state machine. Both reject unprovided ownership, preserve ambiguous faults and remain outside normal activation.

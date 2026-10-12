@@ -153,3 +153,9 @@ in the source repository.
 * [Linux IRQ synchronization scope](p105-linux-irq-sync.md) —189/192 assertions against actual GPL C; AP handler/thread drain is separate from hardware and native IOP state.
 
 * [Actual END/TO recovery](p105-eoc-recovery.md) — original dictionary/mode/pulse and full caller error behavior; Linux retains faults.
+
+* [Global D1946 bank owner](p105-dialog-banks.md) and [checked Linux bank0 transport](../../experiments/p105-bank0/EVIDENCE.md) — owner-bound cached selection, retained failure, no analog activation.
+
+* [Remote accessory signature exchange](../../experiments/p105-authcp-aid/AUTHENTICATION.md) and [original verifier control flow](../../experiments/p105-authcp-aid/CRYPTO_BOUNDARY.md) — unverified bytes, fake crypto, no role/current grant.
+
+* [Actual selected kDFU sleep request](p105-kdfu-sleep-boundary.md) and [FMI client retirement](p105-fmi-client-retirement.md) — original software ordering without physical DMA/IRQ fence.
