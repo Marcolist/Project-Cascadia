@@ -22,6 +22,7 @@
  * bus: two interleaved command sequences on one FMC wedge it and confuse the
  * PPN, so ppn_claim() takes /tmp/nandctl-busN.lock.
  */
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -29,6 +30,9 @@
 #include <string.h>
 #include <sys/file.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
+#include <sys/vfs.h>
+#include <linux/magic.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -67,8 +71,109 @@ static void *map(int fd, uint32_t pa)
     return p;
 }
 
+/* This is a rejection guard, not proof of exclusive NAND/IOP/DMA ownership.
+ * Linux driver_sysfs_add creates device links below its driver's sysfs directory
+ * before probe. Userspace flock does not serialize kernel H2FMI transactions.
+ * Treat unreadable/ambiguous sysfs as unsafe; never unbind the kernel driver.
+ */
+static int ppn_kernel_owner_guard(void)
+{
+    const char *root = "/sys/bus/platform/drivers";
+    struct statfs fs;
+    struct stat st;
+    struct dirent *entry;
+    DIR *dir = NULL;
+    int parent = -1, fd = -1, error = 0;
+
+    parent = open(root, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if (parent < 0)
+        return -errno;
+    if (fstatfs(parent, &fs)) {
+        error = -errno;
+        goto out;
+    }
+    if ((unsigned long)fs.f_type != SYSFS_MAGIC) {
+        error = -ENODEV;
+        goto out;
+    }
+    fd = openat(parent, "apple-h2fmi", O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if (fd < 0) {
+        if (errno != ENOENT)
+            error = -errno;
+        goto out;
+    }
+    if (fstatfs(fd, &fs)) {
+        error = -errno;
+        goto out;
+    }
+    if ((unsigned long)fs.f_type != SYSFS_MAGIC) {
+        error = -ENODEV;
+        goto out;
+    }
+    dir = fdopendir(fd);
+    if (!dir) {
+        error = -errno;
+        goto out;
+    }
+    fd = -1; /* closedir now owns exactly this directory FD. */
+    for (;;) {
+        errno = 0;
+        entry = readdir(dir);
+        if (!entry) {
+            if (errno)
+                error = -errno;
+            break;
+        }
+        if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."))
+            continue;
+        if (fstatat(dirfd(dir), entry->d_name, &st, AT_SYMLINK_NOFOLLOW)) {
+            error = -errno;
+            break;
+        }
+        if (!strcmp(entry->d_name, "module")) {
+            if (!S_ISLNK(st.st_mode)) {
+                error = -EPROTO;
+                break;
+            }
+        } else if (!strcmp(entry->d_name, "bind") || !strcmp(entry->d_name, "unbind") ||
+                   !strcmp(entry->d_name, "uevent")) {
+            if (!S_ISREG(st.st_mode)) {
+                error = -EPROTO;
+                break;
+            }
+        } else {
+            /* A device link denotes a bound/in-probe owner; any other unknown
+             * entry is ambiguous and refused rather than guessed safe. */
+            error = S_ISLNK(st.st_mode) ? -EBUSY : -EPROTO;
+            break;
+        }
+    }
+out:
+    if (dir && closedir(dir) && !error)
+        error = -errno;
+    if (fd >= 0 && close(fd) && !error)
+        error = -errno;
+    if (close(parent) && !error)
+        error = -errno;
+    return error;
+}
+
+static int ppn_raw_owner_ok(void)
+{
+    int error = ppn_kernel_owner_guard();
+
+    if (!error)
+        return 1;
+    errno = -error;
+    fprintf(stderr, "refusing raw PPN: apple-h2fmi bound or sysfs ownership check failed: %s\n",
+            strerror(errno));
+    return 0;
+}
+
 int ppn_open(void)
 {
+    if (!ppn_raw_owner_ok())
+        exit(1);
     int fd = open("/dev/mem", O_RDWR | O_SYNC);
     if (fd < 0) {
         perror("/dev/mem");
@@ -80,6 +185,8 @@ int ppn_open(void)
         fmc[b] = map(fd, FMI_BASE(b) + FMC_OFF);
         ppn_ecc[b] = map(fd, FMI_BASE(b) + ECC_OFF);
     }
+    if (!ppn_raw_owner_ok())
+        exit(1);
     return 0;
 }
 
@@ -158,7 +265,7 @@ int ppn_gates_on(int bus)
 
 int ppn_claim(int bus)
 {
-    return ppn_gates_on(bus) && ppn_lock(bus);
+    return ppn_raw_owner_ok() && ppn_gates_on(bus) && ppn_lock(bus) && ppn_raw_owner_ok();
 }
 
 /* h2fmi_device_reset without the PMGR reset pulse: stop the FMI, bring the
