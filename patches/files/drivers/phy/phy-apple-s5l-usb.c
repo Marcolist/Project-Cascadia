@@ -60,7 +60,7 @@
  *
  * `clock-ids` is a different property in a different namespace -- a reference
  * to a clock source, not to a gate.  otgphyctrl's `clock-ids = <5>` is
- * PREDIV3-CLK (clock register 0x3f10001c); usb-complex's `clock-ids = <292>`
+ * PREDIV3-CLK (clock register 0x3f100054); usb-complex's `clock-ids = <292>`
  * is not a device-clocks entry at all.  Writing a gate value at `base + 5 * 4`
  * and `base + 292 * 4`, as this driver did, hit PERFCNT's gate and an empty
  * address respectively.  Neither has anything to do with USB. */
