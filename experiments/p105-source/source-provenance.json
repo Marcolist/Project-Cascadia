@@ -13,7 +13,7 @@
     "p105-udc-observer.h": "1c5a3ec840937556fe7a7ee803fad5d9efe446f34a6b0b3fb9495ba95b2c4047",
     "apple-hdq-battery.c": "c2177dda1c9b877c7660468679e207f05c39588b66f5ce089b507e67c998995c",
     "apple-hdq-snapshot.h": "af5deaae0ef3e5105d21495cae20d5ac1fbb9e4488618f3a5ef2d34e43fd2c15",
-    "d1946-current-provider.h": "67957313d2a79eec6b2782404d1fbb3e81f4424e1887967f542c70c2a48fc30b",
+    "d1946-current-provider.h": "c63137a6ee30b039e8c321dbaf2e0736a05fcded4eec90264d4cc7f090a9521e",
     "Kconfig": "abecd566d54721eb9ede415e0fc98114d4f4531facb75b80cdc2434edf7a7db6",
     "Makefile": "58d0272bbda5d153c9023338228c1965be098161154c30540c550b4d0d6ec2cf",
     "dwc2-source-reader.patch": "1bdd78296a61b66314d77fde5335167f489a74c74c1f4ca7cc8535ec7d6c9f6b"

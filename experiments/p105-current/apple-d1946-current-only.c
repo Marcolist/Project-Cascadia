@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0
 /* Private, unvalidated P105 inherited-analog-state experiment.
-	* No DT node is supplied; Kconfig and both experiment parameters default off.
-	* No CV, termination, OTP, watchdog or analog-fault initialization is invented.
-	*/
+ * No DT node is supplied; Kconfig and experiment parameters default off.
+ * No CV, termination, OTP, watchdog or analog-fault initialization is invented.
+ */
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/of.h>
@@ -16,9 +16,12 @@
 #include <linux/ktime.h>
 #include <linux/jiffies.h>
 #include <linux/atomic.h>
+#include <linux/of_platform.h>
+#include <linux/spinlock.h>
 #include <linux/pm.h>
 #include "d1946-current-provider.h"
 #include "d1946-current-core.h"
+#include "../p105-source/p105-combined-provider.h"
 
 static bool allow_experiment;
 module_param(allow_experiment, bool, 0444);
@@ -30,6 +33,14 @@ MODULE_PARM_DESC(
 	retained_analog_confirmed,
 	"Operator assertion of independently verified analog retention; not a hardware test");
 
+/* Explicit opt-in to the separately reviewed, real USB2/gauge producer.
+ * Still gated by both inherited-state experiment assertions; no DT is supplied. */
+static bool owned_usb2_source;
+module_param(owned_usb2_source, bool, 0444);
+MODULE_PARM_DESC(
+	owned_usb2_source,
+	"Use the actual owned USB2/gauge provider instead of platform data");
+
 #define D_NEVENTS 72
 #define D_NBANKS 9
 #define D_EXPERIMENT_MAX_MA 720
@@ -39,7 +50,10 @@ struct d1946_current {
 	struct regmap *map;
 	struct d1946_io io;
 	struct mutex bus_lock, io_lock, lifecycle_lock;
+	spinlock_t queue_lock;
 	const struct d1946_current_provider *provider;
+	struct p105_combined_provider *owned_provider;
+	struct platform_device *source_pdev;
 	struct irq_chip chip;
 	struct irq_domain *domain;
 	int parent_irq, virq[3], stop_error;
@@ -70,19 +84,35 @@ static int d_write(void *context, unsigned int reg, const u8 *data,
 	return regmap_bulk_write(((struct d1946_current *)context)->map, reg,
 				 data, n);
 }
+/* Scheduling is serialized with stop. A notifier/IRQ that observed old
+ * ready state cannot queue work after cancel_delayed_work_sync() returns. */
+static void d_queue(struct d1946_current *d, unsigned long delay,
+		    bool allow_fault)
+{
+	unsigned long flags;
+	spin_lock_irqsave(&d->queue_lock, flags);
+	if (READ_ONCE(d->ready) && READ_ONCE(d->events_enabled) &&
+	    !READ_ONCE(d->stopping) &&
+	    (allow_fault || !READ_ONCE(d->fault_latched)))
+		mod_delayed_work(system_wq, &d->work, delay);
+	spin_unlock_irqrestore(&d->queue_lock, flags);
+}
 static void d_invalidate(struct d1946_current *d)
 {
 	atomic_inc(&d->epoch);
-	if (READ_ONCE(d->ready) && READ_ONCE(d->events_enabled) &&
-	    !READ_ONCE(d->stopping))
-		mod_delayed_work(system_wq, &d->work, 0);
+	d_queue(d, 0, true);
 }
 /* io_lock held. A fault never silently restores permission after a good read. */
 static void d_fault(struct d1946_current *d)
 {
+	bool first = !d->fault_latched;
 	d->fault_latched = true;
 	d->applied_valid = false;
-	d_invalidate(d);
+	/* Preserve invalidation for every failure, but never self-requeue an
+  * already-latched worker after its bounded inhibit attempt. */
+	atomic_inc(&d->epoch);
+	if (first)
+		d_queue(d, 0, true);
 }
 
 static void d_irq_bus_lock(struct irq_data *id)
@@ -268,9 +298,8 @@ static void d_worker(struct work_struct *work)
 					     snapshot.budget_ua / 1000,
 					     d->requested_input);
 		input = d_profile_floor(min_t(unsigned int, maximum, 2100));
-		/* Conservative experimental restriction, not a proven minimum
-		 * for physical charging or for iOS trickle charging.
-		 */
+		/* Conservative experiment restriction, NOT proof that 500mA
+                 * USB inputs cannot trickle-charge under iOS. */
 		if (input >= 1000)
 			charge = min(d->requested_charge, D_EXPERIMENT_MAX_MA);
 	}
@@ -338,14 +367,7 @@ out:
 	mutex_unlock(&d->io_lock);
 	if (d->psy)
 		power_supply_changed(d->psy);
-	if (READ_ONCE(d->ready) && !READ_ONCE(d->stopping) &&
-	    !READ_ONCE(d->fault_latched))
-		mod_delayed_work(system_wq, &d->work,
-				 ret == -EAGAIN ? 0 : msecs_to_jiffies(100));
-}
-static void d_external_changed(struct power_supply *psy)
-{
-	d_invalidate(power_supply_get_drvdata(psy));
+	d_queue(d, ret == -EAGAIN ? 0 : msecs_to_jiffies(100), false);
 }
 static const enum power_supply_property d_properties[] = {
 	POWER_SUPPLY_PROP_STATUS,
@@ -412,6 +434,8 @@ static int d_set(struct power_supply *psy, enum power_supply_property property,
 	mutex_lock(&d->io_lock);
 	if (d->stopping || (ma && d->fault_latched))
 		ret = -EIO;
+	else if (!READ_ONCE(d->ready))
+		ret = -EAGAIN;
 	else if (property == POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT)
 		d->requested_input = ma;
 	else if (property == POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT)
@@ -449,6 +473,7 @@ static int d_writeable(struct power_supply *psy, enum power_supply_property p)
 }
 static int d_stop(struct d1946_current *d)
 {
+	unsigned long flags;
 	int ret, input_ret;
 
 	mutex_lock(&d->lifecycle_lock);
@@ -457,11 +482,17 @@ static int d_stop(struct d1946_current *d)
 		mutex_unlock(&d->lifecycle_lock);
 		return ret;
 	}
+	spin_lock_irqsave(&d->queue_lock, flags);
 	WRITE_ONCE(d->stopping, true);
 	WRITE_ONCE(d->ready, false);
 	atomic_inc(&d->epoch);
+	spin_unlock_irqrestore(&d->queue_lock, flags);
 	if (d->parent_enabled && !READ_ONCE(d->parent_failed))
 		disable_irq(d->parent_irq);
+	/* parent_failed may have used disable_irq_nosync() in its own thread.
+  * Drain even that already-disabled path before children/domain/handles free. */
+	if (d->parent_irq >= 0)
+		synchronize_irq(d->parent_irq);
 	cancel_delayed_work_sync(&d->work);
 	mutex_lock(&d->io_lock);
 	d->applied_valid = false;
@@ -509,6 +540,12 @@ static void d_release(struct d1946_current *d)
 	d_stop(d);
 	if (d->psy)
 		power_supply_unregister(d->psy);
+	/* Parent action is exclusively owned (no IRQF_SHARED). Remove/drain it
+  * before disposing nested mappings that its handler consults. */
+	if (d->parent_irq >= 0) {
+		free_irq(d->parent_irq, d);
+		d->parent_irq = -1;
+	}
 	for (i = 0; i < ARRAY_SIZE(source_events); i++)
 		if (d->virq[i]) {
 			free_irq(d->virq[i], d);
@@ -526,19 +563,105 @@ static void d_release(struct d1946_current *d)
 		}
 		mutex_unlock(&d->io_lock);
 	}
-	if (d->parent_irq >= 0)
-		free_irq(d->parent_irq, d);
 	if (d->domain)
 		irq_domain_remove(d->domain);
-	if (d->battery)
+
+		/* IRQ callbacks and work are drained; no provider call can outlive close.
+  * Close managed reader handles before driver-core managed-link teardown. */
+#if IS_REACHABLE(CONFIG_P105_COMBINED_CURRENT_PROVIDER)
+	if (d->owned_provider) {
+		p105_combined_provider_close(d->owned_provider);
+		d->owned_provider = NULL;
+		d->provider = NULL;
+	}
+#endif
+	if (d->source_pdev) {
+		put_device(&d->source_pdev->dev);
+		d->source_pdev = NULL;
+	}
+	if (d->battery) {
 		power_supply_put(d->battery);
-	if (d->input)
+		d->battery = NULL;
+	}
+	if (d->input) {
 		power_supply_put(d->input);
+		d->input = NULL;
+	}
+}
+/* All acquisitions happen before any PMU read and with work/IRQ disabled.
+ * d_release() handles partial acquisition as well as a complete active bind. */
+static int d_providers_acquire(struct d1946_current *d)
+{
+	const struct d1946_current_provider *provider =
+		dev_get_platdata(d->dev);
+	int ret;
+	if (!owned_usb2_source) {
+		if (!provider || !provider->snapshot || !provider->valid)
+			return -ENODEV;
+		d->provider = provider;
+		d->input = power_supply_get_by_phandle(d->dev->of_node,
+						       "power-supplies");
+		if (IS_ERR_OR_NULL(d->input)) {
+			ret = d->input ? PTR_ERR(d->input) : -EPROBE_DEFER;
+			d->input = NULL;
+			return ret;
+		}
+	}
+	d->battery = power_supply_get_by_phandle(d->dev->of_node,
+						 "apple,battery-supply");
+	if (IS_ERR_OR_NULL(d->battery)) {
+		ret = d->battery ? PTR_ERR(d->battery) : -EPROBE_DEFER;
+		d->battery = NULL;
+		return ret;
+	}
+	if (!owned_usb2_source)
+		return 0;
+#if IS_REACHABLE(CONFIG_P105_COMBINED_CURRENT_PROVIDER)
+	{
+		struct device_node *node;
+		node = of_parse_phandle(d->dev->of_node,
+					"apple,usb-source-controller", 0);
+		if (!node)
+			return -EINVAL;
+		d->source_pdev = of_find_device_by_node(node);
+		of_node_put(node);
+		if (!d->source_pdev)
+			return -EPROBE_DEFER;
+		d->owned_provider = p105_combined_provider_open(
+			d->dev, &d->source_pdev->dev, d->battery);
+		if (IS_ERR(d->owned_provider)) {
+			ret = PTR_ERR(d->owned_provider);
+			d->owned_provider = NULL;
+			return ret;
+		}
+		d->provider = p105_combined_provider_ops(d->owned_provider);
+		if (!d->provider || !d->provider->snapshot ||
+		    !d->provider->valid)
+			return -ENODEV;
+	}
+	return 0;
+#else
+	return -EOPNOTSUPP;
+#endif
+}
+static void d_prepare_desc(struct d1946_current *d)
+{
+	d->desc = (struct power_supply_desc){
+		.name = dev_name(d->dev),
+		.type = POWER_SUPPLY_TYPE_USB,
+		.properties = d_properties,
+		.num_properties = ARRAY_SIZE(d_properties),
+		.get_property = d_get,
+		.set_property = d_set,
+		.property_is_writeable = d_writeable,
+		/* No foreign supplier-work callback: power_supply_unregister only
+   * drains this supply's own work, not callbacks from other suppliers.
+   * All routes poll their provider and handle owned raw PMU events. */
+		.external_power_changed = NULL
+	};
 }
 static int d_probe(struct platform_device *pdev)
 {
-	const struct d1946_current_provider *provider =
-		dev_get_platdata(&pdev->dev);
 	struct apple_pmu_i2c *pmu;
 	struct d1946_current *d;
 	struct power_supply_config cfg = {};
@@ -552,8 +675,6 @@ static int d_probe(struct platform_device *pdev)
 	    !of_property_read_bool(pdev->dev.of_node,
 				   "apple,no-input-calibration"))
 		return -EPERM;
-	if (!provider || !provider->snapshot || !provider->valid)
-		return -ENODEV;
 	pmu = dev_get_drvdata(pdev->dev.parent);
 	if (!pmu || !pmu->regmap)
 		return -EPROBE_DEFER;
@@ -566,20 +687,13 @@ static int d_probe(struct platform_device *pdev)
 	mutex_init(&d->bus_lock);
 	mutex_init(&d->io_lock);
 	mutex_init(&d->lifecycle_lock);
-	d->provider = provider;
+	spin_lock_init(&d->queue_lock);
 	atomic_set(&d->epoch, 0);
 	INIT_DELAYED_WORK(&d->work, d_worker);
 	d->io = (struct d1946_io){ d, d_read, d_write };
-	d->input = power_supply_get_by_phandle(pdev->dev.of_node,
-					       "power-supplies");
-	if (IS_ERR_OR_NULL(d->input))
-		return -EPROBE_DEFER;
-	d->battery = power_supply_get_by_phandle(pdev->dev.of_node,
-						 "apple,battery-supply");
-	if (IS_ERR_OR_NULL(d->battery)) {
-		power_supply_put(d->input);
-		return -EPROBE_DEFER;
-	}
+	ret = d_providers_acquire(d);
+	if (ret)
+		goto fail;
 	ret = d_read(d, 0x12, d->boot_masks, D_NBANKS);
 	if (ret)
 		goto fail;
@@ -633,16 +747,7 @@ static int d_probe(struct platform_device *pdev)
 			goto fail;
 		}
 	}
-	d->desc = (struct power_supply_desc){
-		.name = dev_name(d->dev),
-		.type = POWER_SUPPLY_TYPE_USB,
-		.properties = d_properties,
-		.num_properties = ARRAY_SIZE(d_properties),
-		.get_property = d_get,
-		.set_property = d_set,
-		.property_is_writeable = d_writeable,
-		.external_power_changed = d_external_changed
-	};
+	d_prepare_desc(d);
 	cfg.drv_data = d;
 	cfg.of_node = pdev->dev.of_node;
 	d->psy = power_supply_register(d->dev, &d->desc, &cfg);

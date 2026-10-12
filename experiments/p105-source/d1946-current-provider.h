@@ -3,7 +3,7 @@
 #define D1946_CURRENT_PROVIDER_H
 #include <linux/types.h>
 struct power_supply;
-/* No provider is supplied in this experiment. A real provider must publish
+/* The actual owned USB2/gauge adapter is available separately. It must publish
  * a coherent generation covering source permission AND battery telemetry.
  * valid() is nonblocking, cannot call back into this driver, and must reject
  * detach/suspend/role change/measurement invalidation immediately. */
