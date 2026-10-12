@@ -17,7 +17,7 @@ def native_stage(source, files, shared=False, sanitize=True):
     (headers / "string.h").write_text("#pragma once\n#include <string.h>\n")
     binary = out / ("component.so" if shared else "component")
     flags = ["-shared", "-fPIC"] if shared else []
-    if sanitize and not shared:
+    if sanitize:
         flags += ["-fsanitize=undefined", "-fno-sanitize-recover=all"]
     try:
         subprocess.run(["gcc", "-std=gnu11", "-Wall", "-Wextra", "-Werror",

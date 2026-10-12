@@ -49,6 +49,16 @@ The prototype's1000mA enable threshold is a conservative experiment restriction,
 not a proven physical charging minimum. The original consumer compares an
 accumulated owner value; it does not establish that500mA cannot trickle-charge.
 
+An actual [combined source provider](../../experiments/p105-source/) now observes
+completed standard USB2 configuration and combines it with the bounded HDQ-v3
+reader under managed supplier/consumer lifetimes. It does not replace a failed
+current-control hook with a grant: actual libcomposite configuration and matching
+EP0 status completion establish the protocol budget independently. Five actual-C
+ASan/UBSan groups execute the real observer, source/combined adapter, HDQ functions
+and unmodified libcomposite set_config against fake controller/gauge transport.
+The present cdc2 descriptor0mA remains0; USB2 budgets are bounded to500mA.
+No auto frontend/probe/input-supply binding or DWC2 patch application is enabled.
+
 ## Linux-owned NAND
 
 The concrete path is exclusive PPN SLC blocks → writable MTD → UBI → UBIFS,
@@ -72,6 +82,16 @@ sequencer upload plans. Complete single batches match96 original DMA traces;
 included. The original clock field is hclk/1000 in kHz; synthetic fixture
 clocks are arithmetic stress inputs. These preparers do not submit DMA or
 claim durable flash completion.
+
+A separate [Linux-owned BBT transaction state machine](../../experiments/p105-ppn/BBT.md)
+now requires a persistent intent before an operation and distinct confirmed body
+and commit-manifest stages. Unknown durability, bad confirmations or a corrupted
+committed intent keep recovery read-only; an uncertain block is not silently
+reclassified bad. Reinitialization cannot discard retained state, and even a new
+workspace requires two identity-bound blank-slot witnesses before Genesis.4075
+actual C calls pass an independent CRC/persisted-copy/powercut model. This is an
+independent Linux journal design without a hardware backend or on-flash codec;
+fixture receipts are not physical durability evidence.
 
 The filesystem layer is already concrete: an Alpine UBIFS/UBI pair has been
 generated and checked locally. See [the offline SLC rootfs builder](p105-linux-owned-rootfs.md).
