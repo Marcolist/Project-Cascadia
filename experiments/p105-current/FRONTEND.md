@@ -205,3 +205,9 @@ they do not prove electrical or battery safety or that charging works on hardwar
 
 Public source stays outside the normal build. The source-provider include is
 relative to the adjacent isolated component; no DT or enabled config is added.
+
+The separate [CDC2 declared-demand candidate](../p105-gadget/EVIDENCE.md)
+provides source-only default0/opt-in100/500mA descriptors. Actual composite and
+completed EP0/source-reader tests close the former all-zero protocol-budget
+gap for that candidate. The normal gadget remains unchanged; a USB declaration
+does not replace analog protection, calibration or a wall-charger detector.

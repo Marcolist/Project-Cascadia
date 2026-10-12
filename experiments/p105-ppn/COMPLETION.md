@@ -151,3 +151,8 @@ Fence flags are positive confirmations covering the continuously held interval;
 an incomplete receipt permits further bounded waiting, never lease release.
 A known loss of exclusivity must be supplied as an error (for example ESTALE),
 not omitted and later relabeled confirmed. Actual backend proof is absent here.
+
+The [IOP handoff audit](../../docs/research/p105-iop-handoff.md) independently
+shows why a sleep response, software-running flag or IOP clock release cannot
+replace this module's separate DMA/IRQ lifetime fence. CDMA and IOP gates are
+distinct even in the actual native controller graph.

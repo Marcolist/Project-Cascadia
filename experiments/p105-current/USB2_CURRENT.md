@@ -64,3 +64,9 @@ portable export changes only frontend C, adapts the prior fault-worker fixture
 to include the actual new pure selection helper, adds the small-worker test and
 this doc. No other core/headers change. This policy still cannot enable stock
 cdc2 charging because its completed advertised budget is zero.
+
+The separate [CDC2 declared-demand candidate](../p105-gadget/EVIDENCE.md)
+provides source-only default0/opt-in100/500mA descriptors. Actual composite and
+completed EP0/source-reader tests close the former all-zero protocol-budget
+gap for that candidate. The normal gadget remains unchanged; a USB declaration
+does not replace analog protection, calibration or a wall-charger detector.

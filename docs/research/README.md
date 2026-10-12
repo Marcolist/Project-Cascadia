@@ -122,3 +122,12 @@ in the source repository.
 
 * [True clkG factory and native parent bridge](p105-true-clkg.md) — actual
   original dispatch and CPU-idle negative control; registry association separate.
+
+* [IOP halt, CDMA and boot handoff](p105-iop-handoff.md) — separate namespaces,
+  unchecked native stop callbacks and early sleep ACK; no invented DMA fence.
+
+* [Optional CDC2 USB2 declared demand](../../experiments/p105-gadget/EVIDENCE.md)
+  — default0, checked opt-in100/500mA declarations and actual EP0/source tests.
+
+* [Concrete feature integration order](p105-feature-integration.md) — implemented
+  source components, exact join points and remaining physical qualification.
