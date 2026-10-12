@@ -63,3 +63,5 @@ reproduction entry points. Do not copy a staged component into the runtime
 kernel merely because its offline tests pass.
 
 Additional isolated components: [bank0](p105-bank0/EVIDENCE.md) implements Linux I2C/mutex/atomic transport with a globally owned page-selection cache; [AuthCPAID](p105-authcp-aid/AUTHENTICATION.md) implements a pure version2/3 signature-exchange state machine. Both reject unprovided ownership, preserve ambiguous faults and remain outside normal activation.
+
+[THS IDbus](p105-ths-idbus/DESIGN.md) adds the actual regmap submission/response primitive for the P10532-byte windows. It refuses unsupplied physical ownership, retains ambiguous transactions and remains unregistered/default-off.

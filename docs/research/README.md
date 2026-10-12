@@ -161,3 +161,5 @@ in the source repository.
 * [Actual selected kDFU sleep request](p105-kdfu-sleep-boundary.md) and [FMI client retirement](p105-fmi-client-retirement.md) — original software ordering without physical DMA/IRQ fence.
 
 * [Retained DMA diagnostics](p105-retained-dma-diagnostics.md) — blocked program/erase calls preserve buffer-retention warnings without attempting new hardware work.
+
+* [Checked THS IDbus primitive](../../experiments/p105-ths-idbus/DESIGN.md) — Linux regmap submit/receive, checked bulk errors, request identities and software revocation; real IRQ/lease binding remains unprovided.
