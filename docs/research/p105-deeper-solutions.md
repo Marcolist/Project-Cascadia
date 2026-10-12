@@ -64,8 +64,11 @@ foreign callback removal and a fault self-requeue loop are repaired and tested
 with actual functions, including a deterministic pthread interleaving. An owned atomic notifier chain now propagates actual UDC invalidations directly
 to the frontend epoch and urgent worker, with RCU callback drains before teardown.
 Five actual-C notifier tests include deterministic stop/close races and the
-historical stop failure. Physical cutoff timing and analog safety remain open. Its conservative1000mA
-charge restriction means this USB2<=500mA route does not enable charging. No DT,
+historical stop failure. Physical cutoff timing and analog safety remain open. A further default-false owned-USB2 policy now permits bounded nominal100/500mA
+plans (at most80/480mA requested charge codes), retaining all source/gauge/analog
+assertions and both zero slot caps. Seven actual-worker ASan/UBSan tests pass.
+Stock cdc2 remains0mA, so this still does not enable charging in that configuration.
+Physical calibration, slot selection and protection remain unverified. No DT,
 DWC2 patch, boot change or runtime activation is supplied.
 
 ## Linux-owned NAND
@@ -186,6 +189,17 @@ real temporary Power4 owner lease and refuses HSIC kinds2/3/4. The actual WLAN
 HSIC producer uses kind3, clock-mask0x30010 after filtering, membership2/Level1,
 and reset bit0x4. External EHCI kind0 uses membership4/Level2 and bit0x10. This
 source separation does not establish physical WLAN continuity through host tuning.
+
+The [native host clock broker](../../experiments/p105-native-clock/DESIGN.md)
+now supplies the actual44-byte-table parent graph and ordered physical clock/
+gate transitions, with protected foreign/global parent references, first/last
+own-client accounting and bounded acknowledgement checks. Its16 actual-C groups
+compare normalized native request traces and every I/O/epoch failure boundary.
+An additional historical-source control proves that losing an adopted epoch
+validator must latch ownership rather than silently resume after restoration.
+This closes the register-plan implementation gap; it deliberately retains the
+unsatisfied dynamic provider, all-global-owner and inherited-state adoption
+contracts. Neither a compile nor a ready-bit read manufactures those contracts.
 
 ## Review and physical limits
 

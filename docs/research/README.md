@@ -106,3 +106,16 @@ in the source repository.
 
 * [Native CDMA resource/IRQ/translation binding](p105-ppn-cdma-binding.md) —
   independently verified12H/13G evidence; physical ownership/durability separate.
+
+* [CDMA completion and retained DMA lease lifetime](../../experiments/p105-ppn/COMPLETION.md)
+  — actual engine adapter tests; separate external quiescence receipts required.
+
+* [Bounded owned-USB2 current candidate](../../experiments/p105-current/USB2_CURRENT.md)
+  — further default-false100/500mA plan; stock gadget budget/protection remain open.
+
+* [Native PMGR clock-column addresses](p105-pmgr-clock-column.md) — packed-index
+  guards and real+0x38 base; correctedUSBREG mapping, no device action.
+
+* [Checked native host clock broker](../../experiments/p105-native-clock/DESIGN.md)
+  — actual parent graph, shared client accounting and retained fault state;
+  default denied, global-owner adoption still required.
