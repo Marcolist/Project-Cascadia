@@ -57,3 +57,25 @@ rootfs, host keys, pairing records or user device logs accompany this PR.
 Hardware boot/charging/WLAN continuity and physical recovery from injected
 errors have not been verified on the target iPad. Review the generic PHY/USB
 interface changes separately from P105 provider changes before merging.
+
+## Verified extracted revision
+
+Code commit `2118e42c9993b6ad47d620bb9d10d277e303e48e` passes30 offline test entrypoints with0
+failures/skips from an isolated, single-branch checkout.11 affected kernel
+objects pass fresh ARM compilation with the saved normal kernel flags plus
+Werror and0 warnings. The sources were reconstructed from pinned Linux6.12,
+both extracted patches and the normal overlays. No production kernel tree
+was edited. The3 NAND tools link as static ARM ELF files under their project
+flags plusWerror, with0 reported compiler warnings. Loader linking, reserved
+stack assertions, original-overwrite control and actual prologue emulation
+are part of the30-entrypoint run. This is not a fresh complete-kernel link
+or a device-boot test.
+
+The first container test attempt used a non-executable temporary filesystem
+and could not run C fixtures. The first isolated ARM attempt lacked a sibling
+header lookup. Corrected qualification settings pass; candidate code was
+unchanged. No failed attempt is counted as a PASS.
+
+Existing source comments refer to the separate
+[USB research notes](https://github.com/Marcolist/Project-Cascadia/blob/research/p105-power-storage-usb/docs/research/p105-usb-host.md);
+those experiments are not included in this extraction.
