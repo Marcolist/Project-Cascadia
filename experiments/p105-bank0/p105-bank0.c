@@ -40,7 +40,11 @@ static int bank0_valid(struct p105_bank0 *b, const struct p105_bank0_lease *leas
 	if (atomic_read(&b->fault) || atomic64_read(&b->generation) != generation)
 		return -ESTALE;
 	ret = b->ops->valid(b->ctx, lease);
-	return ret > 0 ? -EPROTO : ret;
+	if (ret)
+		return ret > 0 ? -EPROTO : ret;
+	if (atomic_read(&b->fault) || atomic64_read(&b->generation) != generation)
+		return -ESTALE;
+	return 0;
 }
 
 static bool bank0_range(unsigned int reg, unsigned int count, unsigned int lo,

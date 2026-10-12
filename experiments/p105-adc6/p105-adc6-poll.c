@@ -41,9 +41,16 @@ static int adc6_checked(int ret)
 static int adc6_valid(struct p105_adc6 *a, const struct p105_adc6_lease *lease,
 		      u64 generation)
 {
+	int ret;
+
 	if (atomic_read(&a->unknown) || atomic64_read(&a->generation) != generation)
 		return -ESTALE;
-	return adc6_checked(a->ops->valid(a->ctx, lease));
+	ret = adc6_checked(a->ops->valid(a->ctx, lease));
+	if (ret)
+		return ret;
+	if (atomic_read(&a->unknown) || atomic64_read(&a->generation) != generation)
+		return -ESTALE;
+	return 0;
 }
 
 int p105_adc6_read(struct p105_adc6 *a, const struct p105_adc6_lease *lease,

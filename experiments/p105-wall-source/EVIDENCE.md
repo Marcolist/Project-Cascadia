@@ -29,7 +29,7 @@ A future real provider still needs primary evidence for Tristar readback/restore
 
 `tests/test-experimental-wall-source.py` compiles the **complete actual candidate C**, including its header, with explicit fake kernel primitives/regmap and owner callbacks under host GCC `-Wall -Wextra -Werror -fsanitize=address,undefined`. No duplicated Python implementation stands in for C.
 
-Eight groups pass, zero skip in the existing resource-limited offline container:
+Nine groups pass, zero skip in the existing resource-limited offline container:
 
 1. Default-disabled/missing owner/acquire failure/unproved restore: no regmap access; acquired reservations released.
 2. Explicit synthetic positive classification for both orientations and the third-sample usb-charger path; never a hardware or current grant.
@@ -70,3 +70,5 @@ Original type changes call `d224`, which invalidates current cache byte `9ff46a9
 All eight single route-write failure injections still let the original report brick4/ID4 with independently fake positive samples. The optional verifier preserves that negative control, cached-ID reuse, detach/reclassification, raw nonUSB status, failed status reads and selected input-profile checks. Linux candidate rejects I/O/restore errors and does not reuse cached ID.
 
 Heartbeat root review: provider int results are strictly0/negative errno. Positive values returnEPROTO. Wall acquisition with a positive result cannot establish a safely releasable lease: it retains supplied identity, latches fault and issues no I/O/release/retry. Validated acquisitions still perform checked release after malformed validate/settle/ADC results; malformed release retains uncertainty. ADC post-start validation errors still stop with held lifetime and retain UNKNOWN; malformed hold results are retained asEPROTO independently of the first transfer error. Eight actual-C groups now pass for each component;72 original wall comparisons remain unchanged. These are inactive source-only changes, with no normal build or RAM-bundle modification.
+
+Validator callback boundary: fault/generation is rechecked after the external owner validator returns. Invalidation inside the final ADC or bank validator now returnsESTALE with empty output and retained/quarantined state. Invalidation before a wall routing write prevents that transaction and still performs the existing checked release. Complete-C historical/fixed counterexamples were independently repeated. This closes the callback-spanning software gap; no atomic physical cutoff or shared supplier binding is claimed.

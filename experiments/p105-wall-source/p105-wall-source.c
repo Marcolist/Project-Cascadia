@@ -76,9 +76,16 @@ static int wall_checked(int ret)
 static int wall_valid(struct p105_wall_source *s,
 		      const struct p105_wall_lease *lease, u64 generation)
 {
+	int ret;
+
 	if (atomic_read(&s->fault) || atomic64_read(&s->generation) != generation)
 		return -ESTALE;
-	return wall_checked(s->ops->validate(s->ctx, lease));
+	ret = wall_checked(s->ops->validate(s->ctx, lease));
+	if (ret)
+		return ret;
+	if (atomic_read(&s->fault) || atomic64_read(&s->generation) != generation)
+		return -ESTALE;
+	return 0;
 }
 
 static int wall_presence(struct p105_wall_source *s,

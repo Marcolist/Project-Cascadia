@@ -25,7 +25,7 @@ int regmap_read(struct regmap*,unsigned int,unsigned int*);int regmap_write(stru
 FIXTURE=r'''
 #include "p105-wall-source.c"
 static struct p105_wall_source *active;
-static unsigned int io_calls,fail_io,epoch_io,orientation_io,adc_calls,release_calls,acquires,valids,writes;
+static unsigned int io_calls,fail_io,epoch_io,orientation_io,adc_calls,release_calls,acquires,valids,writes,valid_invalidate_at;
 static int adc_error,settle_error,acquire_error,release_error,validate_error;
 static bool proof,wrong_readback;
 static u16 raw[3];
@@ -34,7 +34,7 @@ int regmap_read(struct regmap*m,unsigned int r,unsigned int*v){int e=check();if(
 int regmap_write(struct regmap*m,unsigned int r,unsigned int v){int e=check();assert(!m->pmu);writes++;if(!e)m->r[r]=v;return e;}
 int regmap_bulk_read(struct regmap*m,unsigned int r,void*v,size_t n){assert(m->pmu&&r==10&&n==6);int e=check();if(!e)memcpy(v,m->r+r,n);return e;}
 static int acquire(void*c,struct p105_wall_lease*l){(void)c;acquires++;l->generation=123;l->checked_restore_available=proof;return acquire_error;}
-static int validate(void*c,const struct p105_wall_lease*l){(void)c;assert(l->generation==123);valids++;return validate_error;}
+static int validate(void*c,const struct p105_wall_lease*l){(void)c;assert(l->generation==123);valids++;if(valids==valid_invalidate_at)p105_wall_invalidate(active,false);return validate_error;}
 static int adc(void*c,const struct p105_wall_lease*l,u16*v){(void)c;assert(l->generation==123);assert(adc_calls<3);if(adc_error)return adc_error;*v=raw[adc_calls++];return 0;}
 static int settle(void*c,const struct p105_wall_lease*l,u32 n){(void)c;assert(l->generation==123);assert(n==2000||n==40000);return settle_error;}
 /* Synthetic owner release only, NOT proof that real register semantics permit restore. */
@@ -44,7 +44,7 @@ static struct regmap pmu,tristar;
 static void setup(struct p105_wall_source*s){
  memset(s,0,sizeof(*s));assert(!p105_wall_init(s));active=s;memset(&pmu,0,sizeof(pmu));memset(&tristar,0,sizeof(tristar));pmu.pmu=true;pmu.r[10]=8;tristar.r[12]=0x80;tristar.r[6]=4;
  s->pmu=&pmu;s->tristar=&tristar;s->ops=&ops;s->ctx=NULL;proof=true;wrong_readback=false;
- io_calls=fail_io=epoch_io=orientation_io=adc_calls=release_calls=acquires=valids=writes=0;adc_error=settle_error=acquire_error=release_error=validate_error=0;
+ io_calls=fail_io=epoch_io=orientation_io=adc_calls=release_calls=acquires=valids=writes=valid_invalidate_at=0;adc_error=settle_error=acquire_error=release_error=validate_error=0;
  raw[0]=1802;raw[1]=2457;raw[2]=300;
 }
 static void assert_zero(struct p105_wall_observation*o){unsigned char*p=(void*)o;for(unsigned int i=0;i<sizeof(*o);i++)assert(p[i]==0);}
@@ -93,9 +93,10 @@ static void lifetime(void){
  setup(&s);s.enabled=true;atomic64_set(&s.generation,UINT64_MAX);p105_wall_invalidate(&s,false);assert(atomic_read(&s.fault)&&!atomic64_read(&s.generation));p105_wall_invalidate(&s,false);assert(atomic_read(&s.fault));assert(capture(&s,&o)==-EACCES);assert(!io_calls&&!acquires);
 }
 static void positive_provider_errors(void){struct p105_wall_source s;struct p105_wall_observation o;setup(&s);s.enabled=true;acquire_error=1;assert(capture(&s,&o)==-EPROTO);assert(!io_calls&&!release_calls&&s.lease_uncertain&&s.held_lease.generation==123&&s.held_error==-EPROTO&&atomic_read(&s.fault));acquire_error=0;assert(capture(&s,&o)==-EACCES&&acquires==1);setup(&s);s.enabled=true;validate_error=1;assert(capture(&s,&o)==-EPROTO&&release_calls==1&&!io_calls);setup(&s);s.enabled=true;settle_error=1;assert(capture(&s,&o)==-EPROTO&&release_calls==1);setup(&s);s.enabled=true;adc_error=1;assert(capture(&s,&o)==-EPROTO&&release_calls==1);setup(&s);s.enabled=true;release_error=1;assert(capture(&s,&o)==-EPROTO&&s.held_error==-EPROTO&&s.lease_uncertain&&atomic_read(&s.fault));unsigned int n=io_calls;release_error=0;assert(capture(&s,&o)==-EACCES&&io_calls==n);}
+static void validator_epoch(void){struct p105_wall_source s;struct p105_wall_observation o;setup(&s);s.enabled=true;valid_invalidate_at=3;assert(capture(&s,&o)==-ESTALE);assert(io_calls==3&&!writes&&release_calls==1);}
 int main(int argc,char**argv){
  if(argc==4){struct p105_wall_observation o;u32 a=strtoul(argv[1],NULL,0),b=strtoul(argv[2],NULL,0),c=strtoul(argv[3],NULL,0);int e=p105_wall_classify(a,b,true,c,&o);printf("%d %u %u\n",e,o.source_type,o.divider_id);return 0;}
- assert(argc==2);switch(atoi(argv[1])){case 0:defaults();break;case 1:positive_observations_only();break;case 2:all_errors();break;case 3:removals();break;case 4:restore_fault();break;case 5:lifetime();break;case 6:positive_provider_errors();break;default:abort();}return 0;
+ assert(argc==2);switch(atoi(argv[1])){case 0:defaults();break;case 1:positive_observations_only();break;case 2:all_errors();break;case 3:removals();break;case 4:restore_fault();break;case 5:lifetime();break;case 6:positive_provider_errors();break;case 7:validator_epoch();break;default:abort();}return 0;
 }
 '''
 class CTests(unittest.TestCase):
@@ -108,6 +109,7 @@ class CTests(unittest.TestCase):
  @classmethod
  def tearDownClass(c):c.tmp.cleanup()
  def execute(self,n):subprocess.run([str(self.exe),str(n)],check=True,capture_output=True,text=True)
+ def test_invalidation_during_prewrite_validator(self):self.execute(7)
  def test_default_off_unproved_restore_no_io(self):self.execute(0)
  def test_synthetic_observations_no_current_authorization(self):self.execute(1)
  def test_each_transaction_error_and_invalid_adc(self):self.execute(2)

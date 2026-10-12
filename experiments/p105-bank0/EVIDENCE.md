@@ -29,7 +29,7 @@ Extended bank1/2 data access, selector reads,41 recovery pulse,40/unknown contro
 
 ## Actual-C validation
 
-Ten complete-C groups PASS0skip in `tests/test-experimental-bank0.py` with host GCC Wall/Wextra/Werror plus ASan/UBSan. Entire source/header execute against explicit fake I2C messages, atomics, real pthread mutexes and synthetic owner leases. Positive fixtures are not real-source permission.
+Eleven complete-C groups PASS0skip in `tests/test-experimental-bank0.py` with host GCC Wall/Wextra/Werror plus ASan/UBSan. Entire source/header execute against explicit fake I2C messages, atomics, real pthread mutexes and synthetic owner leases. Positive fixtures are not real-source permission.
 
 Tests cover disabled/unproved/ERR_PTR resources, unknown inherited bank2→checked selector0→status data, shared cache for successive callers, every selector/data fault and short result (including fake partial effects), cache invalidation/quarantine, lease/error retention and failed hold callback, generation changes/wrap/reselect, exact allowlist and exclusive-event restrictions, checked reinit, and **two actual callers** serialized through the shared owner lock. A paused first selector and second caller do not interleave; invalidation while paused makes the first stale and the second deny without further I/O.
 
@@ -44,3 +44,5 @@ Root review additionally rejects positive validity codes, clears valid bounded r
 Root ownership hardening: the cache is bound to `owner_generation`. A different valid owner must reselect page0 even when the old software cache is set. A failed switch retains the new lease and latches UNKNOWN. Generations cannot be reused and every ownership gap still requires invalidation. The added actual-C control starts with an intentionally wrong Fake bank after a new owner and checks both successful reselection and failed-selector quarantine. Ten public test groups include the16 pinned original packet cases; no physical chip state is inferred.
 
 Optional portable original reproduction: `python3 check-original-bank.py OFFICIAL_13G36_KERNELCACHE` checks16 packet fixtures plus native selector/cache/failure controls using caller-supplied hash-verified firmware and Unicorn. The independent root repeat passed; ordinary tests require no firmware.
+
+Validator callback boundary: fault/generation is rechecked after the external owner validator returns. Invalidation inside the final ADC or bank validator now returnsESTALE with empty output and retained/quarantined state. Invalidation before a wall routing write prevents that transaction and still performs the existing checked release. Complete-C historical/fixed counterexamples were independently repeated. This closes the callback-spanning software gap; no atomic physical cutoff or shared supplier binding is claimed.

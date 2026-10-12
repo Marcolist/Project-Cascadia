@@ -25,7 +25,7 @@ u64 ktime_get_ns(void);void usleep_range(unsigned long,unsigned long);
 '''
 FIXTURE=r'''
 #include "p105-adc6-poll.c"
-static struct p105_adc6*active;static struct regmap pmu;static unsigned int calls,fail_io,second_fail_io,epoch_io,holds,polls,busy_polls,starts,stops,sleeps,valids,valid_error_at;
+static struct p105_adc6*active;static struct regmap pmu;static unsigned int calls,fail_io,second_fail_io,epoch_io,holds,polls,busy_polls,starts,stops,sleeps,valids,valid_error_at,valid_invalidate_at;
 static int valid_error,hold_error;static bool cleanup_mismatch,invalid_control,frozen_time,expire_after_sample,wrapped_time;
 static u64 fake_ns,raw_delay_ns;static u16 fake_raw;
 static int io(void){calls++;if(calls==epoch_io)p105_adc6_invalidate(active);return calls==fail_io||calls==second_fail_io?-EIO:0;}
@@ -34,11 +34,11 @@ int regmap_write(struct regmap*m,unsigned int r,unsigned int v){assert(r==0x43&&
 int regmap_bulk_read(struct regmap*m,unsigned int r,void*v,size_t n){(void)m;assert(r==0x44&&n==2);int e=io();if(!e){u8*p=v;p[0]=(fake_raw&15)|0x80;p[1]=fake_raw>>4;}fake_ns+=raw_delay_ns;if(expire_after_sample)p105_adc6_invalidate(active);return e;}
 u64 ktime_get_ns(void){if(wrapped_time&&sleeps)return 0;return fake_ns;}
 void usleep_range(unsigned long low,unsigned long high){assert(low==1000&&high==1100);sleeps++;if(!frozen_time)fake_ns+=1000000;}
-static int valid(void*c,const struct p105_adc6_lease*l){(void)c;assert(l->owner_generation==123);valids++;return !valid_error_at||valids==valid_error_at?valid_error:0;}
+static int valid(void*c,const struct p105_adc6_lease*l){(void)c;assert(l->owner_generation==123);valids++;if(valids==valid_invalidate_at)p105_adc6_invalidate(active);return !valid_error_at||valids==valid_error_at?valid_error:0;}
 static int hold(void*c,const struct p105_adc6_lease*l,int e){(void)c;assert(l->owner_generation==123);assert(e);holds++;return hold_error;}
 static const struct p105_adc6_ops ops={valid,hold};
 static const struct p105_adc6_lease good={123,true,true};
-static void setup(struct p105_adc6*a){memset(a,0,sizeof(*a));assert(!p105_adc6_init(a));active=a;a->pmu=&pmu;a->ops=&ops;memset(&pmu,0,sizeof(pmu));calls=fail_io=second_fail_io=epoch_io=holds=polls=busy_polls=starts=stops=sleeps=valids=valid_error_at=0;valid_error=hold_error=0;cleanup_mismatch=invalid_control=frozen_time=expire_after_sample=wrapped_time=false;fake_ns=1000000;raw_delay_ns=0;fake_raw=0xabc;}
+static void setup(struct p105_adc6*a){memset(a,0,sizeof(*a));assert(!p105_adc6_init(a));active=a;a->pmu=&pmu;a->ops=&ops;memset(&pmu,0,sizeof(pmu));calls=fail_io=second_fail_io=epoch_io=holds=polls=busy_polls=starts=stops=sleeps=valids=valid_error_at=valid_invalidate_at=0;valid_error=hold_error=0;cleanup_mismatch=invalid_control=frozen_time=expire_after_sample=wrapped_time=false;fake_ns=1000000;raw_delay_ns=0;fake_raw=0xabc;}
 static int capture(struct p105_adc6*a,const struct p105_adc6_lease*l,struct p105_adc6_sample*out){memset(out,0xa5,sizeof(*out));int e=p105_adc6_read(a,l,out);if(a&&!IS_ERR_OR_NULL(a))assert(!a->io_lock.held);if(e){const u8*b=(void*)out;for(unsigned int i=0;i<sizeof(*out);i++)assert(!b[i]);}return e;}
 static void defaults(void){struct p105_adc6 a;struct p105_adc6_sample o;setup(&a);assert(capture(&a,&good,&o)==-EACCES);assert(!calls&&!holds);a.enabled=true;struct p105_adc6_lease bad=good;bad.exclusive_all_adc=false;assert(capture(&a,&bad,&o)==-EOPNOTSUPP);bad=good;bad.quiescence_proven=false;assert(capture(&a,&bad,&o)==-EOPNOTSUPP);assert(!calls&&!holds);a.pmu=ERR_PTR(-ENODEV);assert(capture(&a,&good,&o)==-EOPNOTSUPP);a.pmu=&pmu;a.ops=ERR_PTR(-ENODEV);assert(capture(&a,&good,&o)==-EOPNOTSUPP);}
 static void success(void){struct p105_adc6 a;struct p105_adc6_sample o;for(unsigned int raw=0;raw<4096;raw+=257){setup(&a);a.enabled=true;fake_raw=raw;assert(!capture(&a,&good,&o));assert(o.raw==raw&&o.generation==1&&o.started_ns==1000000&&o.completed_ns==2000000);assert(calls==6&&starts==1&&stops==1&&!holds&&pmu.r[0x43]==0);}
@@ -64,7 +64,8 @@ static void reinit(void){struct p105_adc6 a;struct p105_adc6_sample o;setup(&a);
  memset(&a,0,sizeof(a));a.ctx=(void*)1;before=a;assert(p105_adc6_init(&a)==-EINVAL);assert(!memcmp(&a,&before,sizeof(a)));assert(p105_adc6_init(NULL)==-EINVAL);assert(p105_adc6_init(ERR_PTR(-ENODEV))==-EINVAL);
 }
 static void positive_provider_errors(void){struct p105_adc6 a;struct p105_adc6_sample o;setup(&a);a.enabled=true;valid_error=1;assert(capture(&a,&good,&o)==-EPROTO);assert(!calls&&!holds);setup(&a);a.enabled=true;valid_error=1;valid_error_at=3;assert(capture(&a,&good,&o)==-EPROTO);assert(starts==1&&stops==1&&a.first_error==-EPROTO&&atomic_read(&a.unknown)&&holds==1);setup(&a);a.enabled=true;fail_io=2;hold_error=1;assert(capture(&a,&good,&o)==-EIO&&a.first_error==-EIO&&a.hold_error==-EPROTO);}
-int main(int argc,char**argv){assert(argc==2);switch(atoi(argv[1])){case 0:defaults();break;case 1:success();break;case 2:errors();break;case 3:timeout();break;case 4:invalidation();break;case 5:reinit();break;case 6:wrap();break;case 7:positive_provider_errors();break;default:abort();}return 0;}
+static void validator_epoch(void){struct p105_adc6 a;struct p105_adc6_sample o;setup(&a);a.enabled=true;valid_invalidate_at=6;assert(capture(&a,&good,&o)==-ESTALE);assert(atomic_read(&a.unknown)&&holds==1&&stops==1);}
+int main(int argc,char**argv){assert(argc==2);switch(atoi(argv[1])){case 0:defaults();break;case 1:success();break;case 2:errors();break;case 3:timeout();break;case 4:invalidation();break;case 5:reinit();break;case 6:wrap();break;case 7:positive_provider_errors();break;case 8:validator_epoch();break;default:abort();}return 0;}
 '''
 class C(unittest.TestCase):
  @classmethod
@@ -76,6 +77,7 @@ class C(unittest.TestCase):
  @classmethod
  def tearDownClass(c):c.tmp.cleanup()
  def execute(self,n):subprocess.run([str(self.exe),str(n)],check=True,text=True)
+ def test_invalidation_during_final_validator(self):self.execute(8)
  def test_default_denied_and_invalid_pointers(self):self.execute(0)
  def test_raw_success_and_exact_deadline(self):self.execute(1)
  def test_every_io_error_and_cleanup_mismatch(self):self.execute(2)

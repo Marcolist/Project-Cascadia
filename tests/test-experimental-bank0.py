@@ -29,7 +29,7 @@ struct i2c_adapter{int tag;};struct i2c_client{struct i2c_adapter*adapter;unsign
 FIXTURE=r'''
 #include "p105-bank0.c"
 static struct p105_bank0*active;static struct i2c_adapter adapter={123};static struct i2c_client client={&adapter,0x3c,0};
-static u8 banks[3][256];static unsigned int bank,calls,selectors,fail_at,short_at,epoch_at,holds;static bool side_effect_on_error;
+static u8 banks[3][256];static unsigned int bank,calls,selectors,fail_at,short_at,epoch_at,holds,valids,valid_invalidate_at;static bool side_effect_on_error;
 static u64 expected_owner_generation;static int valid_error,hold_error;static u8 prefixes[8];
 struct wire{bool write;u8 reg,bytes[9];unsigned int n;};static struct wire records[8];
 static pthread_mutex_t pause_lock=PTHREAD_MUTEX_INITIALIZER;static pthread_cond_t pause_cond=PTHREAD_COND_INITIALIZER;static bool paused_bus,entered,resume;
@@ -42,10 +42,10 @@ int i2c_transfer(struct i2c_adapter*a,struct i2c_msg*m,int n){assert(a==&adapter
  records[ordinal-1].write=n==1;records[ordinal-1].reg=m[0].buf[0];records[ordinal-1].n=n==1?m[0].len-1:m[1].len;memcpy(records[ordinal-1].bytes,n==1?m[0].buf+1:m[1].buf,records[ordinal-1].n);
  return ret;
 }
-static int valid(void*c,const struct p105_bank0_lease*l){(void)c;assert(l->owner_generation==expected_owner_generation);return valid_error;}
+static int valid(void*c,const struct p105_bank0_lease*l){(void)c;assert(l->owner_generation==expected_owner_generation);if(++valids==valid_invalidate_at)p105_bank0_invalidate(active);return valid_error;}
 static int hold(void*c,const struct p105_bank0_lease*l,int e){(void)c;assert(l->owner_generation==expected_owner_generation&&e);holds++;return hold_error;}
 static const struct p105_bank0_ops ops={valid,hold};static const struct p105_bank0_lease good={123,true,true};
-static void setup(struct p105_bank0*b){memset(b,0,sizeof(*b));assert(!p105_bank0_init(b));active=b;b->client=&client;b->ops=&ops;client.addr=0x3c;client.flags=0;bank=2;calls=selectors=fail_at=short_at=epoch_at=holds=0;valid_error=hold_error=0;expected_owner_generation=123;side_effect_on_error=paused_bus=entered=resume=false;memset(prefixes,0,sizeof(prefixes));for(unsigned int p=0;p<3;p++)for(unsigned int r=0;r<256;r++)banks[p][r]=(p*64+r)&255;}
+static void setup(struct p105_bank0*b){memset(b,0,sizeof(*b));assert(!p105_bank0_init(b));active=b;b->client=&client;b->ops=&ops;client.addr=0x3c;client.flags=0;bank=2;calls=selectors=fail_at=short_at=epoch_at=holds=valids=valid_invalidate_at=0;valid_error=hold_error=0;expected_owner_generation=123;side_effect_on_error=paused_bus=entered=resume=false;memset(prefixes,0,sizeof(prefixes));for(unsigned int p=0;p<3;p++)for(unsigned int r=0;r<256;r++)banks[p][r]=(p*64+r)&255;}
 static int read_sample(struct p105_bank0*b,const struct p105_bank0_lease*l,unsigned int reg,unsigned int n,u8*out){memset(out,0xa5,n);int e=p105_bank0_transfer(b,l,false,reg,out,n);if(e&&reg<=255&&n<=9)for(unsigned int i=0;i<n;i++)assert(!out[i]);return e;}
 static void defaults(void){struct p105_bank0 b;u8 out[9];setup(&b);assert(read_sample(&b,&good,0x3d,1,out)==-EACCES);assert(!calls);b.enabled=true;struct p105_bank0_lease bad=good;bad.exclusive_all_pmu=false;assert(read_sample(&b,&bad,0x3d,1,out)==-EOPNOTSUPP);assert(!calls);b.client=ERR_PTR(-ENODEV);assert(read_sample(&b,&good,0x3d,1,out)==-EOPNOTSUPP);b.client=&client;b.ops=ERR_PTR(-ENODEV);assert(read_sample(&b,&good,0x3d,1,out)==-EOPNOTSUPP);}
 static void packets(void){struct p105_bank0 b;u8 out[9];setup(&b);b.enabled=true;assert(!read_sample(&b,&good,0x0a,6,out));assert(bank==0&&calls==2&&selectors==1&&prefixes[0]==0x1e&&prefixes[1]==0x0a);for(unsigned int i=0;i<6;i++)assert(out[i]==0x0a+i);assert(atomic_read(&b.page0_known));assert(!read_sample(&b,&good,0x44,2,out));assert(calls==3&&selectors==1&&out[0]==0x44&&out[1]==0x45);u8 value=0x40;assert(!p105_bank0_transfer(&b,&good,true,0x3f,&value,1));assert(banks[0][0x3f]==0x40&&calls==4&&selectors==1);}
@@ -70,9 +70,10 @@ static void shared(bool invalidate){struct p105_bank0 b;setup(&b);b.enabled=true
 }
 static void held_validator_and_invalid_output(void){struct p105_bank0 b;u8 out[9];setup(&b);b.enabled=true;assert(!read_sample(&b,&good,0x3d,1,out));valid_error=-ESTALE;assert(read_sample(&b,&good,0x3d,1,out)==-ESTALE);assert(atomic_read(&b.fault)&&!atomic_read(&b.page0_known)&&holds==1&&b.retained_lease_valid);unsigned int n=calls;valid_error=0;assert(read_sample(&b,&good,0x3d,1,out)==-EACCES);assert(calls==n&&holds==1);setup(&b);b.enabled=true;valid_error=1;assert(read_sample(&b,&good,0x3d,1,out)==-EPROTO);assert(!calls);memset(out,0xa5,9);assert(p105_bank0_transfer(NULL,&good,false,0x3d,out,1)==-EINVAL);assert(out[0]==0);memset(out,0xa5,9);assert(p105_bank0_transfer(&b,&good,false,0x1e,out,1)==-EINVAL);assert(out[0]==0);}
 static void owner_change(void){struct p105_bank0 b;u8 out[9];struct p105_bank0_lease next=good;next.owner_generation=124;setup(&b);b.enabled=true;assert(!read_sample(&b,&good,0x3d,1,out));assert(b.selected_owner_generation==123);bank=2;expected_owner_generation=124;assert(!read_sample(&b,&next,0x3d,1,out));assert(selectors==2&&calls==4&&bank==0&&out[0]==0x3d&&b.selected_owner_generation==124);setup(&b);b.enabled=true;assert(!read_sample(&b,&good,0x3d,1,out));bank=2;expected_owner_generation=124;fail_at=3;assert(read_sample(&b,&next,0x3d,1,out)==-EIO);assert(calls==3&&holds==1&&atomic_read(&b.fault)&&!atomic_read(&b.page0_known)&&b.retained_lease.owner_generation==124);fail_at=0;assert(read_sample(&b,&next,0x3d,1,out)==-EACCES);assert(calls==3);}
+static void validator_epoch(void){struct p105_bank0 b;u8 o[1];setup(&b);b.enabled=true;valid_invalidate_at=4;assert(read_sample(&b,&good,0x3d,1,o)==-ESTALE);assert(atomic_read(&b.fault)&&!atomic_read(&b.page0_known)&&holds==1);}
 int main(int argc,char**argv){
  if(argc==5){struct p105_bank0 b;u8 bytes[9];setup(&b);b.enabled=true;unsigned int reg=strtoul(argv[2],NULL,0),n=strtoul(argv[3],NULL,0);bool write=atoi(argv[4]);assert(n>=1&&n<=9);memset(bytes,0xa5,n);int e=p105_bank0_transfer(&b,&good,write,reg,bytes,n);printf("{\"return_code\":%d,\"output_bytes\":[",e);for(unsigned int i=0;i<n;i++)printf("%s%u",i?",":"",bytes[i]);printf("],\"wire_calls\":[");for(unsigned int i=0;i<calls;i++){struct wire*r=&records[i];printf("%s{\"op\":\"%s\",\"prefix\":[%u],\"data\":[",i?",":"",r->write?"write":"read",r->reg);for(unsigned int j=0;j<r->n;j++)printf("%s%u",j?",":"",r->bytes[j]);printf("]}");}printf("]}\n");return 0;}
- assert(argc==2);switch(atoi(argv[1])){case 0:defaults();break;case 1:packets();break;case 2:faults();break;case 3:invalidation();break;case 4:bounds();break;case 5:init_retains();break;case 6:shared(false);shared(true);break;case 7:held_validator_and_invalid_output();break;case 8:owner_change();break;default:abort();}return 0;}
+ assert(argc==2);switch(atoi(argv[1])){case 0:defaults();break;case 1:packets();break;case 2:faults();break;case 3:invalidation();break;case 4:bounds();break;case 5:init_retains();break;case 6:shared(false);shared(true);break;case 7:held_validator_and_invalid_output();break;case 8:owner_change();break;case 9:validator_epoch();break;default:abort();}return 0;}
 '''
 class Tests(unittest.TestCase):
  @classmethod
@@ -84,6 +85,7 @@ class Tests(unittest.TestCase):
  @classmethod
  def tearDownClass(c):c.tmp.cleanup()
  def run_case(self,n):subprocess.run([str(self.exe),str(n)],check=True,text=True)
+ def test_invalidation_during_final_validator(self):self.run_case(9)
  def test_default_denied_invalid_owner_resources(self):self.run_case(0)
  def test_page0_select_before_data_and_shared_cache(self):self.run_case(1)
  def test_every_transfer_fault_partial_effect_short_result(self):self.run_case(2)
