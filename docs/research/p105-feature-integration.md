@@ -133,6 +133,24 @@ may run between separate regmap calls. An all-ADC conversion lease, IRQ/event
 ownership and analog safety qualification remain separate work. The proposed
 parent patch, header and Kconfig fragments are not installed by normal builds.
 
+The later [shared parent/ADC alternative](../../experiments/p105-parent-adc-owner/EVIDENCE.md)
+implements actual complete-conversion locking and a client-bound reservation
+inside the A5 I2C driver. Generic transfers cannot address the reserved PMU,
+including unsupported high/10-bit address aliases; other valid addresses remain
+available. The typed A5 leaf invokes the real controller exactly once and reads
+neither mutable adapter retries nor timeout policy. The generic-core EAGAIN
+counterexample is synthetic; the current A5 controller does not itself return
+EAGAIN, so this is not an observed A5 replay bug. This alternative removes the
+earlier retries-zero integration contract but still requires valid provider and
+consumer lifetimes. It is uninstalled and defaults off. A physical quiescence
+witness is consumed for one conversion; success never manufactures the next
+witness. First and subsequent unqualified conversion admission remain denied.
+
+For authorized device diagnostics, use the [key-pinned RAM-session tools](../DEVICE_TESTING.md).
+Raw PPN tools now reject a bound H2FMI kernel driver or ambiguous sysfs, while
+the normal read-only MTD path remains available. That snapshot rejection does
+not establish exclusive inherited IOP/DMA ownership or prevent a later bind.
+
 [Remote-signature exchange](../../experiments/p105-authcp-aid/AUTHENTICATION.md) now produces bounded version2/3 nonce packets, checks actual response semantics, retains failed pending transactions and exposes only unverified bytes. Real IDbus transport, fresh nonce generation, matching certificate policy/public verification and accessory identity precede any role or electrical grant. No host-private signing operation is needed in this audited exchange/verification path; other iAP modes are outside that conclusion.
 
 [Actual selected kDFU sleep](p105-kdfu-sleep-boundary.md) and [FMI client retirement](p105-fmi-client-retirement.md) close concrete software edges, including final-client release before power acknowledgment. They still do not establish inherited IOP/CDMA no-future-access or IRQ drain; no MTD writer is enabled.

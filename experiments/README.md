@@ -74,3 +74,12 @@ under the adapter lock for every transfer, holds that lock across regmap RMW,
 and checks the separate atomic shutdown path. The replacement parent source,
 header and patch are review material only; the normal overlay is unchanged.
 This does not supply an all-ADC conversion lease or authorize charging.
+
+[Shared PMU/ADC owner](p105-parent-adc-owner/EVIDENCE.md) is a later alternative
+proposal: it reserves the actual A5 PMU address against generic/raw transfers,
+rejects unsupported address aliases, and holds the shared parent and adapter
+locks over an entire ADC conversion. Its A5-specific single-transfer leaf avoids
+mutable generic retry policy. A private lockless regmap cannot escape through
+the parent's regmap lookup. Probe rollback, close, suspend and shutdown are
+checked. Physical admission remains closed: each conversion needs a new real
+quiescence witness, and no runtime producer for that witness is supplied.
