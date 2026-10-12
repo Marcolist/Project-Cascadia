@@ -90,3 +90,7 @@ byte or PORTSC power bit does not prove an electrical voltage/current. The
 firmware under study is iOS 8.4.1, and fixed addresses must not be transferred
 to another iOS build. No firmware binaries, keys or real device dumps belong
 in the source repository.
+
+- [PPN durability: primary sources and E9 scope](p105-ppn-durability-primary.md) — commit/status comparison; no physical receipt or writable backend.
+
+- [USB PHY clock source in the actual boot code](p105-usb-boot-frequency.md) — independent12H/13G producer evidence; no live clock binding.

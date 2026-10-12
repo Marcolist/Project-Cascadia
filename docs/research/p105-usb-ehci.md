@@ -39,7 +39,11 @@ stable research record. Original firmware bytes are not committed.
 The ADT USB complex is physical `0x3f108000`. Its clock-gate list, in order,
 is **[88, 89, 90, 91, 87]**, not the sorted list of IDs. Clock-mask bit positions
 index that list. The `function-usb20_reset` property dispatches PMGR FourCC
-`ARST` with argument `0x34`; that argument is not a direct register offset.
+`ARST` with little-endian argument `0x22` (34 decimal); that argument is
+not a direct register offset. The original Performance reset action maps it
+to PMGR `0x1000 + 4 * 0x22 = 0x1088`, pulses bit31 for one microsecond,
+and restores the saved word. This is an EHCI-controller reset, separate
+from PHY reset and accessory/VBUS power.
 
 | ADT node | Physical controller / IRQ | Publication mask | Clock mask | Companion ID / port type |
 |---|---|---|---|---|

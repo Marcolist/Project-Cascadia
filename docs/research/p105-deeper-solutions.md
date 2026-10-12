@@ -57,7 +57,14 @@ EP0 status completion establish the protocol budget independently. Five actual-C
 ASan/UBSan groups execute the real observer, source/combined adapter, HDQ functions
 and unmodified libcomposite set_config against fake controller/gauge transport.
 The present cdc2 descriptor0mA remains0; USB2 budgets are bounded to500mA.
-No auto frontend/probe/input-supply binding or DWC2 patch application is enabled.
+The current frontend now has a default-false owned USB2 route with actual platform
+and battery references, constructing the combined provider before any PMU read.
+No dummy input supply is used. Queue/stop fencing, parent IRQ synchronization,
+foreign callback removal and a fault self-requeue loop are repaired and tested
+with actual functions, including a deterministic pthread interleaving. Immediate
+UDC-to-PMU cutoff and physical analog safety remain open. Its conservative1000mA
+charge restriction means this USB2<=500mA route does not enable charging. No DT,
+DWC2 patch, boot change or runtime activation is supplied.
 
 ## Linux-owned NAND
 
@@ -90,8 +97,13 @@ committed intent keep recovery read-only; an uncertain block is not silently
 reclassified bad. Reinitialization cannot discard retained state, and even a new
 workspace requires two identity-bound blank-slot witnesses before Genesis.4075
 actual C calls pass an independent CRC/persisted-copy/powercut model. This is an
-independent Linux journal design without a hardware backend or on-flash codec;
-fixture receipts are not physical durability evidence.
+independent Linux journal design without a hardware backend;
+fixture receipts are not physical durability evidence. The new explicit-endian
+[body/manifest codec](../../experiments/p105-ppn/CODEC.md) prepares two complete16KiB
+byte pages with strict schema, identity, CRC and padding checks.33,408 C calls,
+including every single-byte corruption across both pages, pass an independent
+byte oracle. Decode emits no read/blank/durability proof flags and is not a stable
+hardware storage format.
 
 The filesystem layer is already concrete: an Alpine UBIFS/UBI pair has been
 generated and checked locally. See [the offline SLC rootfs builder](p105-linux-owned-rootfs.md).
@@ -165,6 +177,13 @@ ADTs lack the specific `power-gates` property, which is not the inverse of
 normal clock membership and does not account for accessory/VBUS power paths.
 All25 level transitions match the original semantic fixture; complete owners,
 a real clock provider and verified adopted state remain required.
+
+A separate [standard reset client](../../experiments/p105-usb-reset/) preserves
+identity membership for reset kinds0/1/5 and shared PHY+8 bit0x10. It requires a
+real temporary Power4 owner lease and refuses HSIC kinds2/3/4. The actual WLAN
+HSIC producer uses kind3, clock-mask0x30010 after filtering, membership2/Level1,
+and reset bit0x4. External EHCI kind0 uses membership4/Level2 and bit0x10. This
+source separation does not establish physical WLAN continuity through host tuning.
 
 ## Review and physical limits
 

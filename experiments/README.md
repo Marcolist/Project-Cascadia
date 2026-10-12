@@ -8,12 +8,14 @@ charging, USB host or writable NAND result is claimed.
 
 | Component | Implemented | Deliberately still required |
 |---|---|---|
-| `p105-current` | Actual regmap/platform/IRQ-domain/power_supply driver; checked current masks and readback; epoch-bound producer contract; fault latch; inhibit on removal/sleep | Coherent source/gauge producer, exclusive MFD event ownership, analog retention/CV/termination/protection evidence and physical tests |
-| `p105-source` | Completed-configuration/current observer; managed DWC2/HDQ opaque readers and combined epoch/freshness-bound callback provider | Automatic frontend/probe/supply binding, actual analog charging protection and device validation; hook patches remain unapplied |
-| `p105-ppn` | Single SLC-page program/block erase orchestration; checked complete non-AES CDMA descriptor plans; per-controller sequencer preparation; owned DMA leases and cancellation; explicit Linux BBT intent/body/manifest transaction plans; no blind replay | Actual MMIO/CDMA/sequencer binding, exclusive SLC blocks/geometry/BBT, completion and power-cut guarantees; no MTD writer exists |
+| `p105-current` | Actual regmap/platform/IRQ-domain/power_supply driver; checked current masks and readback; epoch-bound producer contract; fault latch; inhibit on removal/sleep | Exclusive MFD event ownership, analog retention/CV/termination/protection evidence, controlled immediate source shutdown and physical tests |
+| `p105-source` | Completed-configuration/current observer; managed DWC2/HDQ opaque readers and combined epoch/freshness-bound callback provider | Controlled immediate source invalidation/shutdown, external accessory source support and physical analog validation; hook patches remain unapplied |
+| `p105-ppn` | Single SLC-page program/block erase orchestration; checked complete non-AES CDMA descriptor plans; per-controller sequencer preparation; owned DMA leases and cancellation; Linux BBT transactions and explicit-endian16KiB body/manifest codec; no blind replay | Actual MMIO/CDMA/sequencer binding, exclusive SLC blocks/geometry/BBT, completion and power-cut guarantees; no MTD writer exists |
 | `p105-usb-client` | Checked two-phase removable-port clock/PHY membership lifecycle; active/standby/off; detach epochs and retained fault ownership | Real shared-PHY/clock provider, completed EHCI-port transition/quiesce, accessory identity/mux and verified external power |
 | `p105-usb-registers` | Checked shared clock-mask aggregation and real regmap tuning/reset primitives; bounded polls; retained errors and owner epochs | Complete actual platform clock graph, real shared power lease/controller quiesce, accessory mux/VBUS and physical validation |
 | `p105-usb-power` | Real clk_get_rate/regmap staged PHY power transitions, preserving RMW and fault ownership; exact supported frequency codes | Authenticated clock provider/binding, adopted initial state and exclusive shared-owner/quiesce lease; no host/VBUS registration |
+| `p105-usb-reset` | Identity-bound standard reset groups0/1/5, real regmap RMW and temporary-power lease contract; preserves other PHY reset bits | Actual shared power membership provider, controller quiesce/adopted ownership and physical validation; no HSIC reset writes |
+| `p105-usb-controller` | Exact selector RMW and owned EHCI reset pulse; checked clock acknowledgement, epoch and all-port quiesce; retained partial errors | Actual role/admission/publication owner, native clock/PHY/VBUS contracts and physical continuity; no complete host transition |
 | `p105-usb-role` | Actual USB 51/53 setup decoder, exact lengths/endian/masks, default-denied policy callbacks | Real gadget function/completion and authorized accessory policy; the known original userspace producer is CarPlay, not a Camera Adapter proof |
 
 The transport-only PPN return explicitly keeps `durability_unknown=true` even
@@ -44,7 +46,7 @@ with synthetic provider/MMIO responses. They contain no firmware instructions
 or device dumps. Normal kernel source/config is not modified by these tests.
 
 ARMv7 object compilation against the actual patched Linux 6.12 generated
-headers passed for the current driver/core, PPN engine, CDMA/sequencer planners all four USB components and the BBT state machine.
+headers passed for the current driver/core, PPN engine, CDMA/sequencer planners all six USB components and the BBT transaction/codec components.
 An object compile checks APIs and target code generation; it does not execute
 the Linux driver framework or establish a hardware binding.
 
