@@ -112,3 +112,11 @@ synthetic certificate/CF providers in native emulation. No complete peer-chain
 trust validator or accessory/current/VBUS grant is supplied. These source-only
 replays require the caller's SHA-pinned official input files and are optional;
 their independent native controls are not added to the ordinary offline count.
+
+## Further qualified source and host-only certificate evidence
+
+`p105-iap-direct-evidence` verifies real direct leaf/issuer signatures and nonce signatures under a deliberately narrow metadata subset.22 real crypto groups include malformed and unsupported lazy extension decoding; it never supplies complete chain trust, accessory identity or power authorization. Its9 original routing cases use explicitly synthetic crypto providers. `p105-iap-native-policy/path-closure` adds6 original basic-path and2 calendar-construction cases with synthetic metadata/CF arithmetic.
+
+`p105-adc-reset-evidence` records16 additional original controls: alternate15d/15e operations do not establish normal43/44 cancellation; a failed cancel write can return the same error, and a cached config write can report success after transport failure. It adds no runtime gate, allowlist or reset sequence. All original-input replays are optional and separate from ordinary test-entrypoint counts.
+
+`p105-h2fmi-lifetime/prepare-lifetime.py` optionally applies the pinned3-source proposal only to an explicitly acknowledged private prepared tree; repository/proposal binding rejects routing mistakes. [Application and manual qualification](p105-h2fmi-lifetime/PRIVATE_APPLICATION.md) exclude automatic builds and explain environment clearing. No normal-image activation follows.

@@ -1,0 +1,14 @@
+{
+  "frozen_review_manifest_SHA256": "99c0d97eb16b50b590290cf2d787d0b1a9ad972c07e93b84d05c5dc791cdbdcf",
+  "files": {
+    "prepare-lifetime.py": "6ea800011f60da288e08a2b7f0d8b5c498fbb9602df9ba45b7f74ab14b1f92fd",
+    "PRIVATE_APPLICATION.md": "1611ab4fa8a6eeffd867a8f0ee1d300862aae881db28e673bd08363f167d770c"
+  },
+  "public_boundary_test_SHA256": "1e5b71e243098ceabb6447b5e25e94828732eb0dc9af02d7f2b54e16de36fa70",
+  "root_independent_filesystem_regression_cases": 24,
+  "root_independent_historical_fixed_containment_cases": 11,
+  "original_shell_environment_forwarding_reproduced": true,
+  "automatic_build_wrapper_exported": false,
+  "normal_runtime_activation": false,
+  "hardware_access": false
+}

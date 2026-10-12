@@ -189,3 +189,27 @@ The source v3 anchor lacks BasicConstraints and carries a critical Apple OID;
 an explicit anchor is exempt from the proven parent CA/KU checks. Complete
 path/critical-extension/date behavior and a real accessory chain remain required
 before a native-profile trust claim. Neither evidence group opens a hardware gate.
+
+## Further qualified paths: direct signatures, ADC cancellation and IOP provider
+
+The host-only [direct signature component](p105-direct-signature-closure.md)
+verifies certificate and nonce mathematics with22 real crypto groups. Original
+routing9/basic6/calendar2/critical-fallback9 cases have separate synthetic
+providers; none supplies full native trust or electrical authority.
+
+[ADC reset evidence](../../experiments/p105-adc-reset-evidence/README.md) adds16
+original cases. Alternate logical15d/15e operations and the watchdog-bound
+panic-reset callback do not establish normal43/44 cancellation. A native cancel
+cleanup can ignore a failed write, and cached config success can hide transport
+failure. The existing checked Linux cleanup remains unchanged; no new gate or
+parent allowlist is added.
+
+[IOP continuation evidence](../../experiments/p105-ppn/continuation/EVIDENCE.md)
+qualifies24 original controls across12H321/13G36. The coherent-property branch
+writes a software byte; otherwise actual IOService code obtains a provider and
+delegates. The getter's memory barrier orders its provider cache, not DMA. The
+dynamic hardware provider remains unqualified; this is a bounded local result,
+not an absence claim for the entire platform graph. No writer or physical
+stop/reset receipt is enabled.
+
+The optional H2FMI [private-tree installer](../../experiments/p105-h2fmi-lifetime/PRIVATE_APPLICATION.md) binds the actual existing repository/proposal and ignores ambient Git redirection. It defaults to checking and applies only after an exact private-tree acknowledgement; interrupted states refuse. An automatic build wrapper is excluded; the manual recipe clears inherited build variables.24 existing installer controls and11 preserved-historical/fixed containment controls pass independently; portable real-Git boundary controls are also provided. A separate full kernel link passed normal flags with18 baseline warnings, without userspace initramfs or any boot/device test.
