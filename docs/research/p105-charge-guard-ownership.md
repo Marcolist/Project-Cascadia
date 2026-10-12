@@ -42,6 +42,13 @@ recorded in the [charging policy research](p105-charging.md).
 This is a current policy parameter, not a watchdog timeout or 300-second
 delay. The adjacent `charger-sleep-interval` property is distinct.
 
+Additional original-instruction evidence narrows this field: actual consumer
+`0x804c40ac` calls accumulator `0x804c4168` over port metadata, then conditionally
+updates two flags, using separate1000/300 comparisons. A total500 yields flags1/0
+in the pinned synthetic fixture, with no PMU transaction. This is not a direct
+hardware USB-budget enable/disable rule. Complete flag interpretation remains
+outside that bounded trace; it does not exclude physical500mA trickle charging.
+
 ## +0x1c1 is used as a transient inhibit
 
 Method **0x804c4c44** clears publication/phase fields +0x221/+0x224 and

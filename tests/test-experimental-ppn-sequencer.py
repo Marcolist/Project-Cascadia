@@ -48,3 +48,18 @@ for bus,clock,n,weights in [(2,1,44,(1,1)),(0,0,44,(1,1)),(0,1,43,(1,1)),(0,1,45
 r=Request(0,1,(C.c_uint32*2)(1,1),44,None);rc,p=run(r,None);assert rc<0
 assert f(None,C.byref(p))<0 and f(C.byref(r),None)<0
 print(f'PASS: {count+2} actual C cases; {matched} original88a4 matches; separate per-controller inputs and strict overflow/clock rejection')
+
+# Unit conversion executes the actual candidate API, including original low32
+# truncation controls which the candidate intentionally rejects.
+clock=lib.ppn_seq_hclk_khz
+clock.argtypes=[C.c_uint64,C.POINTER(C.c_uint32)];clock.restype=C.c_int
+clock_cases=json.loads((HERE/'clock-field-trace.json').read_text())['cases']
+for row in clock_cases:
+    hz=row['hclk_value'];factor=C.c_uint32(0xa5a5a5a5)
+    rc=clock(hz,C.byref(factor))
+    if hz<1000 or hz//1000>0xffffffff:
+        assert rc<0 and factor.value==0xa5a5a5a5
+    else:
+        assert rc==0 and factor.value==hz//1000==row['command_b8']
+assert clock(24000000,None)<0
+print('PASS: exact original11 HCLK conversion cases; zero/truncation rejected')

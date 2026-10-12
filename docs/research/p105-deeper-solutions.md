@@ -125,6 +125,27 @@ chooses mode3/control5. Original USBd flag0x20 changes the software cable's
 That is not proof of physical authentication or power permission. Mode, ID,
 data mux, clock/PHY and electrical supply are separate verified boundaries.
 
+The complete actual userspace forwarding path is now also emulated: official
+13G36 `iaptransportd` method `setUSBMode:forMode:` at0x166d8 uses the actual
+`iapPortManagerForDevPort:`/`service` selectors, opens that service, and forwards
+the requested mode unchanged to library entry0x2a16eb40. Its actual import is
+`IOConnectCallScalarMethod`, selector1 with one64-bit scalar/highword0. Six mode
+cases plus an absent-manager case pass bounded original instructions with fake
+IOKit/Objective-C services. This is a generic mode producer, not Camera Adapter
+identity or physical power permission. Source daemon SHA256 is
+`0eabef460b814484590b1337e7349ddeb37385d1fd80c83332dd562c3410ad1e`;
+shared-cache SHA256 is
+`4f5b5d73244c53fd0bdc5b8012106b10d0dd7607cc850bf7c8f9e9ef3a3f733b`.
+
+The separate [staged power primitive](../../experiments/p105-usb-power/) adds
+actual Linux clock-rate and regmap operations for original PHY power stages.
+Its frequency code is derived from named `usbphyclk`12/24/48MHz, separately from
+ADT ref-clock-sel3. Every clock/epoch/I/O transition is checked. Both official
+ADTs lack the specific `power-gates` property, which is not the inverse of
+normal clock membership and does not account for accessory/VBUS power paths.
+All25 level transitions match the original semantic fixture; complete owners,
+a real clock provider and verified adopted state remain required.
+
 ## Review and physical limits
 
 The components are compiled against actual Linux6.12 ARM headers and tested

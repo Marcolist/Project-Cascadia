@@ -31,6 +31,11 @@ struct ppn_seq_plan {
  * from a previously transformed table. Count is exactly44. No output on error.
  * Request/unpatched input and output must not alias. No MMIO or execution occurs.
  */
+/* Authenticated Linux HCLK in Hz; target conversion only, not clock discovery.
+ * Caller excludes rate changes. Reject zero kHz/truncation; output unchanged
+ * on error. No input/output alias or concurrent mutation is permitted.
+ */
+int ppn_seq_hclk_khz(u64 hclk_hz, u32 *factor);
 int ppn_seq_prepare(const struct ppn_seq_request *request,
 		    struct ppn_seq_plan *plan);
 #endif

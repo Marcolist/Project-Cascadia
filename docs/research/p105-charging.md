@@ -116,6 +116,9 @@ also return zero; their complete origin has not been traced.
 
 The `min-charge-capable-current` threshold of 1000 remains an observed policy
 parameter, not proof of the current available from the Firebat USB port.
+Its actual consumer compares accumulated per-port metadata and updates flags,
+not a direct D1946 hardware charging minimum. See the
+[consumer scope correction](p105-charge-guard-ownership.md).
 
 The ADT also identifies a **Tristar** accessory controller at I2C address
 `0x1a`, with compatibility strings `tristar,ths7383` and `tristar,cbtl1608`.
