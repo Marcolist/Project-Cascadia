@@ -91,3 +91,10 @@ chunks from the complete THS/parser pipeline. Supplied public keys remain
 untrusted: certificate-chain, accessory identity, freshness and role/current/
 VBUS authorization are not provided. This host-only component requires
 Python3.10+ and cryptography41.0.7 and is not installed in the RAM image.
+
+[Read-only MTD lifetime proposal](p105-h2fmi-lifetime/EVIDENCE.md) retains H2FMI
+context for open clients and deferred final device releases, drains synchronous
+reads on removal, and opts out of the unretained regular-NVMEM path. Its generic
+MTD core/header patch supports built-in core/providers only. This proposal is
+not installed by normal builds; it neither enables NAND writes nor supplies an
+inherited IOP/CDMA hardware fence.

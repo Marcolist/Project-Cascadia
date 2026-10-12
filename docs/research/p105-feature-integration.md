@@ -166,3 +166,13 @@ host-side verification against an explicitly supplied public key, with every
 result retaining unverified certificate-chain/identity and no authorization.
 It does not resolve hardware response attribution, authenticate a Camera
 Adapter, establish trusted anchors or supply VBUS. Those remain separate steps.
+
+The [read-only MTD lifetime proposal](../../experiments/p105-h2fmi-lifetime/EVIDENCE.md)
+closes a separate software lifetime gap: open master/partition clients and
+external device references retain context after provider removal/probe unwind.
+Current requests drain and new reads fail ENODEV; automatic regular NVMEM
+publication is disabled for H2FMI and descendants. The opt-in core contract is
+built-in-only and forbids retired-master re-registration. It requires generic
+MTD API review and a complete integration build before normal activation;
+neither the normal overlay nor the prepared RAM baseline installs it. There
+are no program/erase callbacks, NAND-write grant or inherited DMA/IRQ fence.
