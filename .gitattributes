@@ -6,3 +6,6 @@ tests/fixtures/*.patch -whitespace
 
 # Experimental unified diffs: verify their applied source with strict git apply.
 experiments/**/*.patch -whitespace
+
+# Preserve the exact SHA-pinned GPL baseline, including upstream trailing spaces.
+tests/fixtures/h2fmi-lifetime/original-mtdcore.c whitespace=-blank-at-eol

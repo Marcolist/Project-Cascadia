@@ -12,7 +12,7 @@
 #include <stdarg.h>
 #include <unistd.h>
 #include <sched.h>
-typedef uint8_t u8; typedef uint32_t u32; typedef uint64_t u64; 
+typedef uint8_t u8; typedef uint32_t u32; typedef uint64_t u64;
 #define GFP_KERNEL 0
 #define EPROBE_DEFER 517
 #define WARN_ONCE(c,...) fake_warn(c)
