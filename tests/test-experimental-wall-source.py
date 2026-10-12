@@ -84,7 +84,7 @@ static void restore_fault(void){
 }
 static void lifetime(void){
  struct p105_wall_source s={0},saved;struct p105_wall_observation o;
- assert(p105_wall_init(NULL)==-EINVAL);memset(&o,0xa5,sizeof(o));assert(p105_wall_capture(&s,&o)==-EINVAL);assert_zero(&o);
+ assert(p105_wall_init(NULL)==-EINVAL);assert(p105_wall_init((void*)-EIO)==-EINVAL);assert(p105_wall_capture((void*)-EIO,&o)==-EINVAL);assert_zero(&o);assert(p105_wall_capture(&s,(void*)-EIO)==-EINVAL);assert(p105_wall_classify(0,0,false,0,(void*)-EIO)==-EINVAL);p105_wall_invalidate((void*)-EIO,true);memset(&o,0xa5,sizeof(o));assert(p105_wall_capture(&s,&o)==-EINVAL);assert_zero(&o);
  p105_wall_invalidate(NULL,true);p105_wall_invalidate(&s,true);assert(!s.initialized);
  setup(&s);assert(p105_wall_init(&s)==-EALREADY);assert(s.initialized&&!s.enabled&&atomic64_read(&s.generation)==1);
  for(unsigned int i=0;i<3;i++){setup(&s);s.enabled=true;if(i==0)s.pmu=(void*)-EIO;else if(i==1)s.tristar=(void*)-EIO;else s.ops=(void*)-EIO;assert(capture(&s,&o)==-EOPNOTSUPP);assert(!io_calls&&!acquires);}

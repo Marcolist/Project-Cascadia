@@ -10,7 +10,7 @@ int p105_wall_init(struct p105_wall_source *s)
 	const unsigned char *bytes;
 	size_t i;
 
-	if (!s)
+	if (IS_ERR_OR_NULL(s))
 		return -EINVAL;
 	bytes = (const unsigned char *)s;
 	for (i = 0; i < sizeof(*s); i++)
@@ -25,7 +25,7 @@ int p105_wall_init(struct p105_wall_source *s)
 
 void p105_wall_invalidate(struct p105_wall_source *s, bool fault)
 {
-	if (!s || !s->initialized)
+	if (IS_ERR_OR_NULL(s) || !s->initialized)
 		return;
 	if (!atomic64_inc_return(&s->generation))
 		fault = true; /* Old observation identities may not be reused. */
@@ -39,7 +39,7 @@ int p105_wall_classify(u32 a, u32 b, bool third_valid, u32 c,
 {
 	u32 ratio, id;
 
-	if (!out)
+	if (IS_ERR_OR_NULL(out))
 		return -EINVAL;
 	memset(out, 0, sizeof(*out));
 	if (a > 4998 || b > 4998 || (third_valid && c > 4998))
@@ -187,10 +187,10 @@ int p105_wall_capture(struct p105_wall_source *s, struct p105_wall_observation *
 	u32 a, b, c;
 	int ret, release_ret;
 
-	if (!out)
+	if (IS_ERR_OR_NULL(out))
 		return -EINVAL;
 	memset(out, 0, sizeof(*out));
-	if (!s || !s->initialized)
+	if (IS_ERR_OR_NULL(s) || !s->initialized)
 		return -EINVAL;
 	mutex_lock(&s->io_lock);
 	ret = -EACCES;
