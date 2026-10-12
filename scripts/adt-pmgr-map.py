@@ -3,7 +3,7 @@
 
     python3 scripts/adt-pmgr-map.py [DeviceTree.raw] [a peek dump of the PMGR]
 
-The pmgr node carries a `device-clocks` property: 116 entries of 36 bytes, one
+The pmgr node carries a `device-clocks` property: 116 entries of 44 bytes, one
 per clock and per gateable device, and each one says where its registers are.
 
     +0x00  4     byte 3 is the clock id -- the number device nodes use in
@@ -12,7 +12,8 @@ per clock and per gateable device, and each one says where its registers are.
     +0x08  4     up to four parent clock ids, one per byte
     +0x0c  u32   index of the power-state register: PMGR + 0x1000 + idx * 4
     +0x10  u32   index of the clock register:       PMGR + 0x0000 + idx * 4
-    +0x14  16    name
+    +0x14   8    two additional words (not decoded here)
+    +0x1c  16    name
 
 PMGR is the pmgr node's first reg entry, 0x3f100000 here.
 
@@ -29,12 +30,13 @@ tools/pmgr-map.sh leaves in logs/ -- each line also gets its live value, so the
 state iBoot left the machine in reads out by name.
 """
 
+import argparse
 import re
 import struct
 import sys
 
 PMGR = 0x3f100000
-ENTRY = 36
+ENTRY = 44
 
 
 def adt_nodes(data):
@@ -85,22 +87,44 @@ def state(v):
         'ON ' if (n & 0xf) == 0xf else 'off', n & 0xf, (n >> 4) & 0xf, n >> 8)
 
 
+def device_clock_entries(data, entry_size=ENTRY):
+    """Decode the P105 12H321 44-byte ABI; 36-byte format is explicit only."""
+    if entry_size not in (36, 44):
+        raise ValueError("device-clock entry size must be 36 or 44")
+    if not data or len(data) % entry_size:
+        raise ValueError("device-clocks is empty or contains a truncated entry")
+    if len(data) // entry_size > 4096:
+        raise ValueError("too many device-clock entries")
+    entries = []
+    for offset in range(0, len(data), entry_size):
+        entry = data[offset:offset + entry_size]
+        words = struct.unpack_from('<5I', entry)
+        name = entry[-16:].split(b'\0', 1)[0].decode('ascii')
+        entries.append((entry[3], words, name))
+    return entries
+
+
 def main():
-    dt = sys.argv[1] if len(sys.argv) > 1 else 'ibootfiles/DeviceTree.raw'
-    live = peek_dump(sys.argv[2]) if len(sys.argv) > 2 else {}
-    nodes = adt_nodes(open(dt, 'rb').read())
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('dt', nargs='?', default='ibootfiles/DeviceTree.raw')
+    parser.add_argument('peek', nargs='?')
+    parser.add_argument('--entry-size', type=int, choices=(36, 44), default=44,
+                        help='P105 12H321 uses 44; 36 requires explicit older-ABI selection')
+    args = parser.parse_args()
+    live = peek_dump(args.peek) if args.peek else {}
+    with open(args.dt, 'rb') as source:
+        nodes = adt_nodes(source.read())
     pmgr = nodes.get('device-tree/arm-io/pmgr')
     if not pmgr or 'device-clocks' not in pmgr:
-        sys.exit('no device-clocks in the pmgr node of %s' % dt)
-    dc = pmgr['device-clocks']
+        sys.exit('no device-clocks in the pmgr node of %s' % args.dt)
+    try:
+        entries = device_clock_entries(pmgr['device-clocks'], args.entry_size)
+    except ValueError as error:
+        sys.exit(str(error))
 
     print('%-14s %3s  %-10s %-10s  %s' % ('name', 'id', 'gate', 'clock',
                                           'live' if live else ''))
-    for k in range(len(dc) // ENTRY):
-        e = dc[k * ENTRY:(k + 1) * ENTRY]
-        w = struct.unpack('<5I', e[:20])
-        name = e[20:36].split(b'\0')[0].decode('latin1', 'replace')
-        cid = e[3]
+    for cid, w, name in entries:
         gate = PMGR + 0x1000 + w[3] * 4 if 0 < w[3] < 0x400 else None
         clock = PMGR + w[4] * 4 if 0 < w[4] < 0x400 else None
         note = ''

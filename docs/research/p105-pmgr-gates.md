@@ -116,7 +116,7 @@ All three run on the device over ssh: `ssh root@10.55.0.2 sh -s < tools/<script>
 
 ## The ADT had it all along (2026-09-19)
 
-The pmgr node carries `device-clocks`, 4176 bytes: 116 entries of 36 bytes, one
+The pmgr node carries `device-clocks`, 5104 bytes: 116 entries of 44 bytes, one
 per clock and per gateable device.
 
     +0x00  4     byte 3 is the id -- the number device nodes put in
@@ -125,7 +125,16 @@ per clock and per gateable device.
     +0x08  4     up to four parent clock ids, one per byte
     +0x0c  u32   index of the power-state register: PMGR + 0x1000 + idx * 4
     +0x10  u32   index of the clock register:       PMGR + idx * 4
-    +0x14  16    name
+    +0x14   8    two additional words (not decoded by the mapper)
+    +0x1c  16    name
+
+The pinned P105 12H321 PerformanceController parses the property with an
+actual 44-byte stride (`0x80b8c474`, `0x80b8c4ac`); its count block
+`0x80b8c43e..0x80b8c45e` divides the OSData length by 44. The static official
+ADT has 5104 bytes, giving 116 entries. The older 36-byte/name-at-20 mapper
+misaligned this input; `--entry-size 36` is now an explicit compatibility
+option, while P105 uses 44 by default. This is an offline diagnostic fix,
+not a clock/power-enable change.
 
 `scripts/adt-pmgr-map.py` prints it, and with a `peek r 3f100000 7168` dump as a
 second argument it prints the live value beside each name. It agrees with the
