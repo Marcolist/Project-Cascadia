@@ -11,6 +11,7 @@ struct p105_adc6_lease {
 	bool exclusive_all_adc;
 	bool quiescence_proven;
 };
+/* Callback results use0/negative errno; positive values are protocol errors. */
 struct p105_adc6_ops {
 	int (*valid)(void *ctx, const struct p105_adc6_lease *lease);
 	/* Quarantine all ADC users on uncertainty; lifetime held through this call. */
@@ -39,6 +40,8 @@ struct p105_adc6_sample {
 };
 int p105_adc6_init(struct p105_adc6 *a);
 void p105_adc6_invalidate(struct p105_adc6 *a);
+/* Initialized resources/config stay live and immutable; output must be
+ * disjoint from context/lease storage. Callbacks must not reenter io_lock. */
 int p105_adc6_read(struct p105_adc6 *a, const struct p105_adc6_lease *lease,
 		   struct p105_adc6_sample *out);
 #endif

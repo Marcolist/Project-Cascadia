@@ -29,7 +29,7 @@ A future real provider still needs primary evidence for Tristar readback/restore
 
 `tests/test-experimental-wall-source.py` compiles the **complete actual candidate C**, including its header, with explicit fake kernel primitives/regmap and owner callbacks under host GCC `-Wall -Wextra -Werror -fsanitize=address,undefined`. No duplicated Python implementation stands in for C.
 
-Seven groups pass, zero skip in the existing resource-limited offline container:
+Eight groups pass, zero skip in the existing resource-limited offline container:
 
 1. Default-disabled/missing owner/acquire failure/unproved restore: no regmap access; acquired reservations released.
 2. Explicit synthetic positive classification for both orientations and the third-sample usb-charger path; never a hardware or current grant.
@@ -39,6 +39,7 @@ Seven groups pass, zero skip in the existing resource-limited offline container:
 6. **72 recorded original-code comparisons** from `original-classifier-oracle.json`, pinned by SHA256 in the test. These cover raw0/819/820/1819/1820/2368/2369/4095 grids, third-sample bounds and divider IDs. The optional independent verifier executes the actual original instructions to regenerate/check their results. Software arithmetic only.
 
 7. Checked one-shot initialization, invalid resources, retained failed lease and generation wrap: no reset/retry or unowned access.
+8. Malformed positive provider results: negative errors, unknown acquisition latch and no automatic retry.
 
 Run portable GCC/sanitizer tests from the repository:
 
@@ -67,3 +68,5 @@ Sample classes use <=2220/<=2890/>2890. With nonzero second scalar the ratio is 
 Original type changes call `d224`, which invalidates current cache byte `9ff46a9d`. Nonzero cached brick ID bypasses new sampling until detach clears it. Original selected type4 ID profiles1..5 request500/1000/1000/2100/2400; unknown IDs and type5 fall back1000. This metadata is **not** copied into a Linux power budget. The actual zero-charge-policy verifier isolates profile selection without operating a charger.
 
 All eight single route-write failure injections still let the original report brick4/ID4 with independently fake positive samples. The optional verifier preserves that negative control, cached-ID reuse, detach/reclassification, raw nonUSB status, failed status reads and selected input-profile checks. Linux candidate rejects I/O/restore errors and does not reuse cached ID.
+
+Heartbeat root review: provider int results are strictly0/negative errno. Positive values returnEPROTO. Wall acquisition with a positive result cannot establish a safely releasable lease: it retains supplied identity, latches fault and issues no I/O/release/retry. Validated acquisitions still perform checked release after malformed validate/settle/ADC results; malformed release retains uncertainty. ADC post-start validation errors still stop with held lifetime and retain UNKNOWN; malformed hold results are retained asEPROTO independently of the first transfer error. Eight actual-C groups now pass for each component;72 original wall comparisons remain unchanged. These are inactive source-only changes, with no normal build or RAM-bundle modification.

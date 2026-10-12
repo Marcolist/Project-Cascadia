@@ -33,12 +33,17 @@ void p105_adc6_invalidate(struct p105_adc6 *a)
 		atomic_set(&a->unknown, 1);
 }
 
+static int adc6_checked(int ret)
+{
+	return ret > 0 ? -EPROTO : ret;
+}
+
 static int adc6_valid(struct p105_adc6 *a, const struct p105_adc6_lease *lease,
 		      u64 generation)
 {
 	if (atomic_read(&a->unknown) || atomic64_read(&a->generation) != generation)
 		return -ESTALE;
-	return a->ops->valid(a->ctx, lease);
+	return adc6_checked(a->ops->valid(a->ctx, lease));
 }
 
 int p105_adc6_read(struct p105_adc6 *a, const struct p105_adc6_lease *lease,
@@ -158,7 +163,7 @@ unknown:
 	a->retained_lease_valid = true;
 	a->first_error = ret;
 	a->cleanup_error = cleanup_ret;
-	hold_ret = a->ops->hold_unknown(a->ctx, lease, ret);
+	hold_ret = adc6_checked(a->ops->hold_unknown(a->ctx, lease, ret));
 	a->hold_error = hold_ret;
 unlock:
 	mutex_unlock(&a->io_lock);

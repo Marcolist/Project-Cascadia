@@ -92,9 +92,10 @@ static void lifetime(void){
  saved=s;assert(p105_wall_init(&s)==-EALREADY);assert(!memcmp(&s,&saved,sizeof(s)));assert(capture(&s,&o)==-EACCES);assert(release_calls==1);
  setup(&s);s.enabled=true;atomic64_set(&s.generation,UINT64_MAX);p105_wall_invalidate(&s,false);assert(atomic_read(&s.fault)&&!atomic64_read(&s.generation));p105_wall_invalidate(&s,false);assert(atomic_read(&s.fault));assert(capture(&s,&o)==-EACCES);assert(!io_calls&&!acquires);
 }
+static void positive_provider_errors(void){struct p105_wall_source s;struct p105_wall_observation o;setup(&s);s.enabled=true;acquire_error=1;assert(capture(&s,&o)==-EPROTO);assert(!io_calls&&!release_calls&&s.lease_uncertain&&s.held_lease.generation==123&&s.held_error==-EPROTO&&atomic_read(&s.fault));acquire_error=0;assert(capture(&s,&o)==-EACCES&&acquires==1);setup(&s);s.enabled=true;validate_error=1;assert(capture(&s,&o)==-EPROTO&&release_calls==1&&!io_calls);setup(&s);s.enabled=true;settle_error=1;assert(capture(&s,&o)==-EPROTO&&release_calls==1);setup(&s);s.enabled=true;adc_error=1;assert(capture(&s,&o)==-EPROTO&&release_calls==1);setup(&s);s.enabled=true;release_error=1;assert(capture(&s,&o)==-EPROTO&&s.held_error==-EPROTO&&s.lease_uncertain&&atomic_read(&s.fault));unsigned int n=io_calls;release_error=0;assert(capture(&s,&o)==-EACCES&&io_calls==n);}
 int main(int argc,char**argv){
  if(argc==4){struct p105_wall_observation o;u32 a=strtoul(argv[1],NULL,0),b=strtoul(argv[2],NULL,0),c=strtoul(argv[3],NULL,0);int e=p105_wall_classify(a,b,true,c,&o);printf("%d %u %u\n",e,o.source_type,o.divider_id);return 0;}
- assert(argc==2);switch(atoi(argv[1])){case 0:defaults();break;case 1:positive_observations_only();break;case 2:all_errors();break;case 3:removals();break;case 4:restore_fault();break;case 5:lifetime();break;default:abort();}return 0;
+ assert(argc==2);switch(atoi(argv[1])){case 0:defaults();break;case 1:positive_observations_only();break;case 2:all_errors();break;case 3:removals();break;case 4:restore_fault();break;case 5:lifetime();break;case 6:positive_provider_errors();break;default:abort();}return 0;
 }
 '''
 class CTests(unittest.TestCase):
@@ -113,6 +114,7 @@ class CTests(unittest.TestCase):
  def test_every_epoch_change_and_absent_fault_status(self):self.execute(3)
  def test_failed_release_latches_fault_no_retry(self):self.execute(4)
  def test_checked_init_retained_failed_lease_error_resources_and_generation_wrap(self):self.execute(5)
+ def test_positive_provider_results_reject_and_ambiguous_acquisition_latches(self):self.execute(6)
  def test_recorded_original_instruction_classifier_oracle(self):
   # Normalized observations recorded by actual pinned original instructions.
   oracle_path=HERE/'original-classifier-oracle.json'

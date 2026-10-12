@@ -14,6 +14,9 @@ struct p105_wall_lease {
 	u8 orientation;
 };
 
+/* All int callbacks return0 or a negative errno. acquire negative errors
+ * retain no lease; partial acquisition must be rolled back by the provider.
+ * Positive acquisition is a protocol fault with unknown retained ownership. */
 struct p105_wall_ops {
 	int (*acquire)(void *ctx, struct p105_wall_lease *lease);
 	int (*validate)(void *ctx, const struct p105_wall_lease *lease);
@@ -54,5 +57,7 @@ int p105_wall_init(struct p105_wall_source *s);
 void p105_wall_invalidate(struct p105_wall_source *s, bool fault);
 int p105_wall_classify(u32 first, u32 second, bool third_valid, u32 third,
 		       struct p105_wall_observation *out);
+/* Resources/config stay live and immutable; output must be disjoint from
+ * context storage. Callbacks must not reenter the held io_lock. */
 int p105_wall_capture(struct p105_wall_source *s, struct p105_wall_observation *out);
 #endif

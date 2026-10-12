@@ -68,12 +68,17 @@ int p105_wall_classify(u32 a, u32 b, bool third_valid, u32 c,
 	return 0;
 }
 
+static int wall_checked(int ret)
+{
+	return ret > 0 ? -EPROTO : ret;
+}
+
 static int wall_valid(struct p105_wall_source *s,
 		      const struct p105_wall_lease *lease, u64 generation)
 {
 	if (atomic_read(&s->fault) || atomic64_read(&s->generation) != generation)
 		return -ESTALE;
-	return s->ops->validate(s->ctx, lease);
+	return wall_checked(s->ops->validate(s->ctx, lease));
 }
 
 static int wall_presence(struct p105_wall_source *s,
@@ -161,13 +166,13 @@ static int wall_sample(struct p105_wall_source *s,
 	ret = wall_route(s, lease, generation, route);
 	if (ret)
 		return ret;
-	ret = s->ops->settle(s->ctx, lease, settle);
+	ret = wall_checked(s->ops->settle(s->ctx, lease, settle));
 	if (ret)
 		return ret;
 	ret = wall_presence(s, lease, generation);
 	if (ret)
 		return ret;
-	ret = s->ops->adc6_raw(s->ctx, lease, &raw);
+	ret = wall_checked(s->ops->adc6_raw(s->ctx, lease, &raw));
 	if (ret)
 		return ret;
 	if (raw > 4095)
@@ -204,6 +209,15 @@ int p105_wall_capture(struct p105_wall_source *s, struct p105_wall_observation *
 		goto unlock;
 	generation = atomic64_read(&s->generation);
 	ret = s->ops->acquire(s->ctx, &lease);
+	if (ret > 0) {
+		/* Invalid acquisition result cannot establish a releasable lease. */
+		s->held_lease = lease;
+		s->held_error = -EPROTO;
+		s->lease_uncertain = true;
+		p105_wall_invalidate(s, true);
+		ret = -EPROTO;
+		goto unlock;
+	}
 	if (ret)
 		goto unlock;
 	/* No concrete provider currently proves this restore contract. */
@@ -226,7 +240,7 @@ int p105_wall_capture(struct p105_wall_source *s, struct p105_wall_observation *
 		ret = wall_presence(s, &lease, generation);
 release:
 	/* Always release, including unproved restore/acquire-success/error paths. */
-	release_ret = s->ops->restore_release(s->ctx, &lease);
+	release_ret = wall_checked(s->ops->restore_release(s->ctx, &lease));
 	if (release_ret) {
 		/* Keep the failed release identity for diagnosis; never reinit away. */
 		s->held_lease = lease;
