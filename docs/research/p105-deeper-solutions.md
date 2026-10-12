@@ -95,6 +95,15 @@ state and detach epochs. It requires the completed controller transition and
 an idempotent shared PHY/clock backend; it does not reset the WLAN block or
 pretend a generic power-off proves resource release.
 
+A third isolated [register backend](../../experiments/p105-usb-registers/) now
+implements shared owner clock-mask aggregation and the original host tuning/reset
+sequence using Linux regmap. It defaults denied, checks each I/O and connection
+epoch, and keeps failed ownership latched. Native final gate releases additionally
+require separately verified parent-graph policy. It does not claim a complete
+PHY power transition: real power-level lease and controller quiesce are still
+required. Five owner scenarios and four tuning combinations match original
+instructions with synthetic providers.
+
 Apple's [powered Camera Adapter support](https://support.apple.com/en-us/111811)
 documents an external Lightning power input supplying the iOS device and USB
 peripheral. Its [mini1 compatibility filter](https://www.apple.com/shop/ipad/accessories/chargers-adapters/ipad-mini-1st-generation-usb-3)
