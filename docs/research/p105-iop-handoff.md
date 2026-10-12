@@ -238,3 +238,5 @@ The root independently repeated the frozen60 exact source/literal checks,
 network-disabled build image. Normalized facts/traces match byte-for-byte.
 Private record: `logs/night/iop-handoff-root-repeat.log`; no firmware or physical
 receipt is distributed by this document.
+
+The [native IRQ retirement audit](p105-cdma-irq-retirement.md) independently narrows the callback-drain requirement: a software-masked original registration still invokes a handler for a previously supplied event, and a captured callback/token survives later synthetic table replacement. Those software controls do not model physical pending/critical-section races. Checked cancellation accordingly does not manufacture a drained-callback receipt.

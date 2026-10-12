@@ -27,3 +27,5 @@ ARMv7 object against actual Linux6.12 commit `adc218676eef25575469234709c2d87185
 The separate original6-group harness demonstrates the original unchecked behaviors as negative controls and tests actual timer divide/inverse/current-counter instructions. It has no Apple code bytes or hardware calls. Matching official iBoot input is external/read-only; old12H offsets are not reused.
 
 Generation wrap permanently latches UNKNOWN before any later capture. The public complete-C fixture includes a wrap/admission test. The original independent six-group instruction/timer verification is recorded privately without exporting firmware bytes.
+
+Optional original-instruction reproduction requires the pinned official plaintext and Unicorn (no firmware supplied): `python3 experiments/p105-adc6/check-original.py --image /path/to/iBoot.13G36.dec`. Six original groups execute real tick division/inverse/counter instructions and normal/error ADC paths with fake I/O.

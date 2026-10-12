@@ -135,3 +135,15 @@ in the source repository.
 * [Native clkG registry-owner pipeline](p105-clkg-registry.md) — actual startup
   publisher/lookup/factory dispatch with absent/wrong-marker controls; live
   Linux/global-owner binding remains separate.
+
+* [Checked wall-source observation](../../experiments/p105-wall-source/EVIDENCE.md) — actual Tristar routing/ADC classifier; retained restore ownership, no current grant.
+
+* [Checked ADC6 polling](../../experiments/p105-adc6/EVIDENCE.md) — actual PMU43/44 conversion, bounded checked cleanup and retained uncertainty; no real all-ADC owner yet.
+
+* [Checked CDMA cancellation](../../experiments/p105-ppn/CANCELLATION.md) —9,118 actual-C assertions/288 original traces; successful transport still WAIT_FENCE.
+
+* [Native IRQ retirement boundary](p105-cdma-irq-retirement.md) — mask-set is not a captured-callback drain.
+
+* [Boot CDMA startup](p105-boot-cdma.md) — actual BSS clear and clock-gate path, distinct from inherited hardware reset/fence.
+
+* [Lightning digital-ID record](../../experiments/p105-accessory-id/DESIGN.md) —4,360 original semantic cases; debugger/ignore-vbus/ramdisk context, no adapter identity or role/current grant.
