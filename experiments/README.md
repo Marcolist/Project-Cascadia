@@ -12,6 +12,7 @@ charging, USB host or writable NAND result is claimed.
 | `p105-ppn` | Single SLC-page program/block erase orchestration; checked complete non-AES CDMA descriptor plans; per-controller sequencer preparation; owned DMA leases and cancellation; no blind replay | Actual MMIO/CDMA/sequencer binding, exclusive SLC blocks/geometry/BBT, completion and power-cut guarantees; no MTD writer exists |
 | `p105-usb-client` | Checked two-phase removable-port clock/PHY membership lifecycle; active/standby/off; detach epochs and retained fault ownership | Real shared-PHY/clock provider, completed EHCI-port transition/quiesce, accessory identity/mux and verified external power |
 | `p105-usb-registers` | Checked shared clock-mask aggregation and real regmap tuning/reset primitives; bounded polls; retained errors and owner epochs | Complete actual platform clock graph, real shared power lease/controller quiesce, accessory mux/VBUS and physical validation |
+| `p105-usb-power` | Real clk_get_rate/regmap staged PHY power transitions, preserving RMW and fault ownership; exact supported frequency codes | Authenticated clock provider/binding, adopted initial state and exclusive shared-owner/quiesce lease; no host/VBUS registration |
 | `p105-usb-role` | Actual USB 51/53 setup decoder, exact lengths/endian/masks, default-denied policy callbacks | Real gadget function/completion and authorized accessory policy; the known original userspace producer is CarPlay, not a Camera Adapter proof |
 
 The transport-only PPN return explicitly keeps `durability_unknown=true` even
@@ -41,7 +42,7 @@ with synthetic provider/MMIO responses. They contain no firmware instructions
 or device dumps. Normal kernel source/config is not modified by these tests.
 
 ARMv7 object compilation against the actual patched Linux 6.12 generated
-headers passed for the current driver/core, PPN engine, CDMA/sequencer planners and all three USB components.
+headers passed for the current driver/core, PPN engine, CDMA/sequencer planners and all four USB components.
 An object compile checks APIs and target code generation; it does not execute
 the Linux driver framework or establish a hardware binding.
 

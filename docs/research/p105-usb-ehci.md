@@ -147,8 +147,18 @@ the same OHCI startup sequence.
 The P105 arbitrator instance constructor `0x80b3934c` writes actual vptr
 **`0x80b3b0c8`**, verified at PIC pair `0x80b39354/0x80b39356` plus 8.
 Its instance `+0x344` points to `0x80b3a335`, the clock-enable client method.
-Instance `+0x348` points to inherited `0x80864871`, the complementary
-clock-client method. Instance `+0x34c` points to `0x80b3a78d`, which changes
+Instance `+0x348` points to inherited `0x80864871`, a separate **power-gate**
+client membership method, not the inverse of `+0x344`. It manages 16 sets at
+object `+0x74..+0xb0` and dispatches provider `+0x358` on first/last membership.
+That actual AppleARMIODevice target `0x804ae0b8` consumes `power-gates`; its
+property parser is `0x804ae382..0x804ae3b6` (PIC pair
+`0x804ae384/0x804ae38a` resolves literal `power-gates`). Both pinned P105 ADTs
+have no `power-gates` on usb-complex. With count zero, the actual provider
+returns `0xe00002c7` without downstream dispatch, and the arbitrator ignores
+that result. This is one specific absent provider path, not proof that no
+accessory/VBUS power callback exists elsewhere.
+
+Instance `+0x34c` points to `0x80b3a78d`, which changes
 USB-complex bit `0x80`; it must not be mislabeled as the disable-clock method.
 
 The subclass clock-enable method maintains three extra client sets for mask
