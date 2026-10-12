@@ -65,3 +65,13 @@ known controller state, and latch read/write/delay/epoch errors without
 claiming rollback or full clientstate5. Quiescing Wi-Fi is a real remaining
 integration task; active WLAN cannot be treated as harmless during a shared
 EHCI controller reset. Native VBUS and adapter/authentication remain separate.
+
+## Retained provider loss regression
+
+A missing epoch or required membership callback after an owned transition now
+uses the existing retained-fault path. Restoring the callback cannot silently
+resume the old physical disposition. Cold, untouched contexts remain retryable.
+`python3 tests/test-experimental-usb-provider-loss.py` compiles the actual three
+backends under UBSan and executes five groups, including earlier admission
+blocks as negative controls and adopted active PHY state without own writes.
+No physical hardware or new default binding is used.

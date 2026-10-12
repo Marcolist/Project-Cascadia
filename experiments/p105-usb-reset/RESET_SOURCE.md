@@ -75,3 +75,13 @@ Three additional HSIC regression groups PASS: actual P105 fallback arguments,
 synthetic phy-port override/phy-id (not board defaults), and original factory
 membership/state dispatch. These fixtures do not execute inherited HSIC
 controller start, platform GPIO-ready callbacks, pad tuning or publication.
+
+## Retained provider loss regression
+
+A missing epoch or required membership callback after an owned transition now
+uses the existing retained-fault path. Restoring the callback cannot silently
+resume the old physical disposition. Cold, untouched contexts remain retryable.
+`python3 tests/test-experimental-usb-provider-loss.py` compiles the actual three
+backends under UBSan and executes five groups, including earlier admission
+blocks as negative controls and adopted active PHY state without own writes.
+No physical hardware or new default binding is used.

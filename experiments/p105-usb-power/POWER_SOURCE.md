@@ -142,3 +142,13 @@ No global runtime repair, native VBUS write, charge command or blind role mask
 is part of this group. EHCI Port1/high-speed-device then a high-speed hub/TT
 remains the intended first path, with normal USB gadget and HSIC WLAN defaults
 preserved until an explicit hardware trial is authorized.
+
+## Retained provider loss regression
+
+A missing epoch or required membership callback after an owned transition now
+uses the existing retained-fault path. Restoring the callback cannot silently
+resume the old physical disposition. Cold, untouched contexts remain retryable.
+`python3 tests/test-experimental-usb-provider-loss.py` compiles the actual three
+backends under UBSan and executes five groups, including earlier admission
+blocks as negative controls and adopted active PHY state without own writes.
+No physical hardware or new default binding is used.

@@ -230,8 +230,10 @@ int cascadia_phy_power_transition(struct cascadia_phy_power *p,
 	    !p->complete_owned_membership || !p->all_owners_quiesced ||
 	    !p->transition_lease_verified || !p->state_adopted)
 		return -EOPNOTSUPP;
-	if (!p->validate_epoch || !p->clock_membership)
-		return -ENODEV;
+	if (!p->validate_epoch || !p->clock_membership) {
+		ret = -ENODEV;
+		goto failed;
+	}
 	ret = epoch(p, value);
 	if (ret)
 		goto failed;

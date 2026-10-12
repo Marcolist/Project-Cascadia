@@ -58,7 +58,8 @@ static int prepare(struct cascadia_controller *c, u64 epoch)
 	    !c->external_power_contract_verified)
 		return -EOPNOTSUPP;
 	if (!c->validate_epoch)
-		return -ENODEV;
+		return (c->touched || c->completed_operations) ?
+			fault(c, -ENODEV) : -ENODEV;
 	if (epoch != c->role_lease_epoch)
 		return -ESTALE;
 	ret = epoch_check(c, epoch);

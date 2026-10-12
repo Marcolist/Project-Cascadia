@@ -87,8 +87,10 @@ int cascadia_reset_client_update(struct cascadia_reset_client *c,
 	if (!c->p105_binding_verified || !c->complete_standard_group_owned ||
 	    !c->all_owners_quiesced || !c->state_adopted)
 		return -EOPNOTSUPP;
-	if (!c->validate_epoch || !c->temporary_power_mask)
-		return -ENODEV;
+	if (!c->validate_epoch || !c->temporary_power_mask) {
+		ret = -ENODEV;
+		goto failed;
+	}
 	ret = epoch(c, value);
 	if (ret)
 		goto failed;

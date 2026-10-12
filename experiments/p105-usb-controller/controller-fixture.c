@@ -123,6 +123,7 @@ void inject(int field, int value)
 	case 12: c.validate_epoch = 0; break;
 	case 13: c.role_lease_epoch = value; break;
 	case 14: epoch_error = value; break;
+	case 15: c.validate_epoch = validate; break;
 	default: assert(0);
 	}
 }

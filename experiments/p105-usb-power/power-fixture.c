@@ -76,7 +76,7 @@ int inspect(int field,int i)
 }
 void inject(int field,int value)
 {
-	switch(field){case 0:fail_io=value;break;case 1:stale_io=value;break;case 2:stale_validate=value;break;case 3:clock_change=value;break;case 4:fault_clock=value;break;case 5:power.p105_binding_verified=0;break;case 6:power.power_gates_absent_verified=0;break;case 7:power.complete_owned_membership=0;break;case 8:power.all_owners_quiesced=0;break;case 9:power.transition_lease_verified=0;break;case 10:power.state_adopted=0;break;case 11:power.validate_epoch=0;break;case 12:power.clock_membership=0;break;case 13:power.adopted_clock_hz=value;break;default:assert(0);}
+	switch(field){case 0:fail_io=value;break;case 1:stale_io=value;break;case 2:stale_validate=value;break;case 3:clock_change=value;break;case 4:fault_clock=value;break;case 5:power.p105_binding_verified=0;break;case 6:power.power_gates_absent_verified=0;break;case 7:power.complete_owned_membership=0;break;case 8:power.all_owners_quiesced=0;break;case 9:power.transition_lease_verified=0;break;case 10:power.state_adopted=0;break;case 11:power.validate_epoch=0;break;case 12:power.clock_membership=0;break;case 13:power.adopted_clock_hz=value;break;case 14:power.validate_epoch=validate;power.clock_membership=membership;break;default:assert(0);}
 }
 unsigned int regvalue(int map,unsigned int off){assert(map>=0 && map<2 && !(off&3) && off/4<2048);return maps[map].values[off/4];}
 void seed(int map,unsigned int off,unsigned int value){assert(map>=0 && map<2 && !(off&3) && off/4<2048);maps[map].values[off/4]=value;}
