@@ -184,3 +184,24 @@ Native emulation requires existing Unicorn; metadata inspection uses existing
 cryptography41.0.7. All source files are read/hash-verified before execution.
 No downloads, package installations, privileged containers, service/device
 access, hardware writes or native daemon execution occur in these scripts.
+
+
+## Real public-key and RSA link follow-up
+
+The earlier weak-key controls supplied synthetic size/algorithm getters. The
+[rsa-closure](rsa-closure/REAL_RSA_PROFILE.md) follow-up independently replays
+seven native public DER import, descriptor, block-size and weak-root consumer
+cases. A1023-bit public modulus occupies128 bytes and is not weak under that
+specific native byte threshold. The supported experimental nonce profile remains
+exact RSA-1024; this evidence does not widen it or establish a trusted root.
+
+[Native link controls](rsa-closure/NATIVE_LINK.md) independently execute actual
+RSA public modular exponentiation and original PKCS1 padding/signature checks:
+valid, corrupt and absent-issuer-parameters RSA cases. Each case reaches native
+RSA verification; absent parameters in this two-entry/no-later-parent path do not
+mean verification was skipped. Python supplies SHA256; certificate field objects,
+CF and heap are synthetic. The full certificate parser/path builder/trust policy
+are not executed. Three independent public cryptography tests corroborate the
+signature fixture. No chain trust, accessory identity or power/role permission is
+provided. New ordinary tests validate only public crypto and pinned records;
+manual original-input replays remain separate from those tests.

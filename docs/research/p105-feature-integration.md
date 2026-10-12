@@ -213,3 +213,14 @@ not an absence claim for the entire platform graph. No writer or physical
 stop/reset receipt is enabled.
 
 The optional H2FMI [private-tree installer](../../experiments/p105-h2fmi-lifetime/PRIVATE_APPLICATION.md) binds the actual existing repository/proposal and ignores ambient Git redirection. It defaults to checking and applies only after an exact private-tree acknowledgement; interrupted states refuse. An automatic build wrapper is excluded; the manual recipe clears inherited build variables.24 existing installer controls and11 preserved-historical/fixed containment controls pass independently; portable real-Git boundary controls are also provided. A separate full kernel link passed normal flags with18 baseline warnings, without userspace initramfs or any boot/device test.
+
+
+### Native key/link closure after checkpoint28
+
+The optional [RSA source evidence](../../experiments/p105-iap-native-policy/rsa-closure/REAL_RSA_PROFILE.md)
+replaces synthetic key-size results with seven independently repeated native
+DER-import/getter/weak-root cases. Three further original link cases run real
+RSA public exponentiation, with independent public signature checks. This closes
+specific key/math gaps; it supplies no path construction, anchor legitimacy,
+complete iAP trust, adapter-specific authorization or protected VBUS. Current
+power and USB-role consumers still receive no physical permission from it.
