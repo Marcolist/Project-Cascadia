@@ -147,3 +147,9 @@ in the source repository.
 * [Boot CDMA startup](p105-boot-cdma.md) — actual BSS clear and clock-gate path, distinct from inherited hardware reset/fence.
 
 * [Lightning digital-ID record](../../experiments/p105-accessory-id/DESIGN.md) —4,360 original semantic cases; debugger/ignore-vbus/ramdisk context, no adapter identity or role/current grant.
+
+* [Earlier boot reset/AIC initialization](p105-boot-early-reset.md) — native accepted-ID matrix and actual initializer calls, no inferred DMA fence.
+
+* [Linux IRQ synchronization scope](p105-linux-irq-sync.md) —189/192 assertions against actual GPL C; AP handler/thread drain is separate from hardware and native IOP state.
+
+* [Actual END/TO recovery](p105-eoc-recovery.md) — original dictionary/mode/pulse and full caller error behavior; Linux retains faults.

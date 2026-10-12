@@ -182,3 +182,15 @@ checked write status, checked read status and verified value/mask, plus known
 lifecycle/physical safety semantics. This provides useful failure requirements
 without inventing CV/termination values. Those missing configuration and safety
 proofs remain blocking prerequisites for an active charger implementation.
+
+## Later independent boot-stage qualification
+
+Independent root repeats of the frozen iBEC12/iBoot13 direct-table classifier/wrapper and13 byte helpers pass5+5 groups. A separate actual iBSS12 PMU initializer/classifier/RMW repeat passes5 groups. These scopes execute the original instructions with fake bus/GPIO/bytes, not a physical PMU or a model of analog protection.
+
+The selected GPIO ordinal (tokens405/406/407, not hardware pin numbers) controls identical eight raw PMU pairs in the three stages:1e02,d001,ef10,1e01,ee0c,1e02,d000,1e00. Only ordinals<=3 execute this sequence; modelA1432 does not prove its physical ordinal. Earlier failures continue through the table, and the wrapper normalizes the last error to success. The meaning of d0/ef/ee is still unqualified; there is no CV/OTP-programming inference. Subsequent original13 bank-wrapper analysis identifies1e as the selector, but the flat old byte fixture does not itself model banks or prove switch acknowledgement.
+
+The original iBSS initializer performs104 fake transfers in the selected revision45 path. Failure of its initial1c write is hidden by later success. Its40-bit40 RMW can lose inherited bits after a failed read and still report success.13 charger verification likewise can compare stale zero after failed transport. These are exact software counterexamples; successful boot return cannot attest a retained analog configuration. Checked Linux helpers must preserve transport errors and must not replay unqualified raw tables or write40.
+
+The [actual END/TO recovery audit](p105-eoc-recovery.md) further executes7 source-method groups plus3 complete consumer/recovery groups. A failed41 restoration still clears the native software timeout reference. Linux retains the fault and performs no automatic recovery pulse.
+
+Private independent repeat logs: analog-tables-root-repeat-v1.log, analog-write13-root-repeat-v1.log, analog-ibss-root-repeat-v1.log, eoc-source-root-repeat-v1.log, eoc-full-status-root-repeat-v1.log. No device access, physical protection/retention certification or normal feature activation follows.
