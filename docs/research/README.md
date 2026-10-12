@@ -131,3 +131,7 @@ in the source repository.
 
 * [Concrete feature integration order](p105-feature-integration.md) — implemented
   source components, exact join points and remaining physical qualification.
+
+* [Native clkG registry-owner pipeline](p105-clkg-registry.md) — actual startup
+  publisher/lookup/factory dispatch with absent/wrong-marker controls; live
+  Linux/global-owner binding remains separate.

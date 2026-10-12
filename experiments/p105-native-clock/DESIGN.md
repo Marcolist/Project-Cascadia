@@ -16,11 +16,13 @@ blocks. Original constructed Performance vptr80b90938 +350→804b3141,
 +3e8→80b8c975, +448→804b2a8d (optional observer), +3ec→80b8cbf1,
 +488→80b8de39, +490/+494→80b8df5d/df65 establish this interface. The retained
 PMGR provider mapping at+self550 is unchanged, actual physical reg[0]3f100000.
-This does not resolve the USB-complex's dynamically supplied platform pointer.
+This does not resolve the USB-complex's platform pointer on a running unit.
 The actual clkG forwarder reaches this graph through a CommandGate; the earlier
 804b56d4 opcode decoder is cpuI, not clkG. The [true clkG factory and bridge](../../docs/research/p105-true-clkg.md)
 now have public bounded original-instruction regression coverage. Registry
-association and inherited global adoption still need separate proof.
+[source registry association](../../docs/research/p105-clkg-registry.md) is now
+executed with explicit fake matching; live Linux binding and inherited global
+adoption still need separate proof.
 
 Source-bound nodes are2/3/4/5(PREDIV),40(UPERF),42(USBREG),87(PHY),89(EHCI).
 Roots87/89 >=56 have native idempotent active bits; parents<56 have counts,
@@ -110,7 +112,7 @@ limits, overflow, invalid resources and reinit. ASan/UBSan executable and real
 Linux6.12 ARM headers compile this same source. OHCI/domain successes in the
 native fixture are explicitly unsupported by the candidate, not claimed passes.
 
-Next integration gates are actual dynamic Performance-provider association,
+Next integration gates are explicit Linux Performance-equivalent supplier binding,
 all-global-owner migration/baseline adoption, parent-clock/rate lifecycle and
 mapping/clock reference ownership, full controller/PHY sequencing, accessory
 identification/authorization, and verified externally supplied VBUS. A HS device

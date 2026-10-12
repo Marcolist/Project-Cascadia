@@ -159,8 +159,12 @@ def experiment(requests, clock_word_override=None, initial_reg_seed=0x24600000,
   out.append({'request':[cid,state],'counts':{str(k):r(COUNTS+4*k)for k in(29,35,40,41,42,87,88,89,90,91)},'active_ids':[k for k in rows if r(ACTIVE+4*(k//32))&(1<<(k%32))], 'pending_gate_bits':[r(OBJ+0x578+4*i)for i in range(3)],'dirty_gate_bits':[r(OBJ+0x584+4*i)for i in range(3)],'events':list(events),'recursion_flags':recursion_flags,'return':change_flags,'instructions':steps})
  return {'factory_return':fret,'factory_vptr':hex(r(FUNC)),'init_return':init,'init_events':init_events,'states':out,'synthetic_options':{'clock_word_override':clock_word_override,'initial_reg_seed':initial_reg_seed,'auto_ack':auto_ack,'off_zero_indices':list(off_zero_indices)},'hardware_access':False}
 
-def verify(kernelcache=None,device_tree=None):
+def verify(kernelcache=None,device_tree=None,registry=False):
  load_sources(kernelcache,device_tree)
+ if registry:
+  spec=importlib.util.spec_from_file_location('registry',Path(__file__).resolve().with_name('emulate-pmgr-registry.py'))
+  module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+  return module.verify_with_sources(e,data,adt,table,MIN,MAX,rows)
  cases=[experiment([(89,1),(87,1),(89,0),(87,0)]),experiment([(89,1),(89,1),(89,0)]),experiment([(87,1),(87,0)])]
  assert [x[1]for x in cases[0]['states'][0]['events']if x[0]=='fake_pmgr_write']==['0x48','0x4c','0x50','0x54','0x9c','0x1080','0x1088']
  assert all(x['return']==0 for c in cases for x in c['states'])
@@ -173,5 +177,6 @@ if __name__=='__main__':
  parser=argparse.ArgumentParser(description=__doc__)
  parser.add_argument('--kernelcache',type=Path)
  parser.add_argument('--device-tree',type=Path)
+ parser.add_argument('--registry',action='store_true',help='execute source publisher/lookup with an explicit fake registry')
  args=parser.parse_args()
- print(json.dumps(verify(args.kernelcache,args.device_tree),indent=2))
+ print(json.dumps(verify(args.kernelcache,args.device_tree,registry=args.registry),indent=2))

@@ -50,7 +50,7 @@ PMGR acknowledgements are synthetic. No physical state or inherited ownership
 is inferred from them. The source constructor and factory—not guessed slot
 numbers—select the class and default callback.
 
-## Registry association evidence and remaining gap
+## Registry association evidence and follow-up
 
 P105 arm-io/function-clock_gate raw00000010476b6c63 has prefix00000010,
 exactly pmgr/AAPL,phandle raw00000010. Original generic lookup804ab31c reads
@@ -60,13 +60,14 @@ IOFunctionParent10000000. Registry parent registration API804ab1fc formats the
 same key at804ab24e from a supplied provider's AAPL,phandle, then places it on
 the supplied service at804ab274. This is a concrete static identity convention.
 
-The **actual registration caller supplying the Performance service**, the
-registry matcher result and S5LIO's asynchronous cached-function publication
-remain to be closed. The true bridge fixture supplies that matched parent and
-an already populated cached function; it does not execute the registry or
-prove which live instance wins a duplicate publication. Native broker's dynamic
-association/all-global-adoption guards stay denied. Static personality matches
-or equal slot offsets alone are insufficient evidence.
+The [subsequent publisher/lookup proof](p105-clkg-registry.md) now executes the
+actual retained-provider startup caller, marker publication, generic lookup and
+subclass factory fallback. The fake matcher returns the same original
+Performance owner; missing/wrong markers cannot fabricate a parent. The bridge
+fixture on this page still supplies its parent directly, preserving its exact
+scope and prior oracle. Asynchronous S5LIO cached publication, duplicate live
+services, explicit Linux supplier binding and all-global-owner adoption remain
+separate requirements. Native runtime admission stays denied.
 
 A superclass-table pointer used in a PIC call can include its two negative C++
 vtable header words, whereas a constructed object vptr skips them; do not compare
