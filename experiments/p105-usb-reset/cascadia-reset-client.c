@@ -152,7 +152,11 @@ int cascadia_reset_client_update(struct cascadia_reset_client *c,
 	c->owner_epochs[owner] = next ? value : 0;
 	return 0;
 failed:
-	if (c->touched || c->memberships[owner]) {
+	/* Adoption includes every peer, even when this caller has no slot yet. */
+	for (i = 0; i < CASCADIA_RESET_OWNERS; i++)
+		if (c->memberships[i])
+			break;
+	if (c->touched || i < CASCADIA_RESET_OWNERS) {
 		c->fault = true;
 		c->fault_error = ret;
 	}

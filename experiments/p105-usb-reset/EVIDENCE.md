@@ -77,3 +77,26 @@ is returned by this primitive.
 Portable reproduction: `python3 tests/test-experimental-usb-reset.py`. Source
 is compiled with fake Regmap/lease/mutex and UBSan. The original semantic
 fixture has synthetic providers; no firmware bytes or native mapping is supplied.
+
+
+## Cold-adopted peer fault retention
+
+Failure checks include all16 retained membership slots, rather than only the
+requested owner. A valid cold-adopted peer can exist without any prior local
+write; a request from a new empty slot must not forget it when the validator,
+temporary power provider or attachment epoch is lost. Restoring the provider
+cannot resume this faulted context. The original error, peer bitmap/epoch and
+zero-I/O disposition remain retained. A completely empty untouched context keeps
+its prior cold admission/retry behavior.
+
+A separate read-only peer review confirms this permitted adoption case. Thirty
+actual historical controls (standard kinds0/1/5, adopted slots1/15, missing
+providers and initial/no-op/pre-lease epoch failures) reproduce resumption
+without reconciliation. Thirty-five fixed/cold cases pass using
+complete actual C with ASan/UBSan and explicitly fake adoption/Regmap/lease/epoch
+providers. The historical complete source is reconstructed from a SHA-pinned
+failed tail and matches its preserved source hash. Existing13 reset tests and5
+provider-loss tests remain separate. No physical adoption, DMA fence, reset,
+USB-host, WLAN, VBUS or iPad test is performed. Repeat:
+
+    python3 tests/test-usb-reset-adopted-peer.py
