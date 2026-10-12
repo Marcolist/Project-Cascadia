@@ -112,3 +112,9 @@ Reproduction: `tests/test-experimental-native-clock.py`,
 No hardware permission, normal feature activation or publication follows from
 these source tests. The local PR package makes the changes reviewable before
 any separate device-validation decision.
+
+## Newly implemented transport boundaries
+
+[Wall classification](../../experiments/p105-wall-source/EVIDENCE.md) and [checked ADC6 conversion](../../experiments/p105-adc6/EVIDENCE.md) now provide actual Linux-C source building blocks. Their callers must implement one exclusive Tristar/all-ADC owner with checked restoration and coherent attachment epoch; the wall measurement receives raw conversion results and never grants a current budget itself. UNKNOWN ADC state quarantines users even after a successful zero-stop readback. Charger CV/termination/protection qualification remains separate.
+
+[CDMA cancellation](../../experiments/p105-ppn/CANCELLATION.md) now supplies bounded checked transport. Its successful result remains WAIT_FENCE; only a separately qualified backend can prove no future memory accesses and drained native/Linux IRQ callbacks before any memory release. Masking an IRQ does not erase a callback already captured by the original dispatcher.
