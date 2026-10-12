@@ -108,13 +108,23 @@ static int hdq_read8(struct hdq_battery *b, u8 reg)
 
 static int hdq_read16(struct hdq_battery *b, u8 reg)
 {
-	int lo, hi, tries;
+	int before, after, low, tries;
 
+	/* No HDQ write command can be emitted, including reg+1. */
+	if (reg > 0x7e)
+		return -EINVAL;
 	for (tries = 0; tries < 3; tries++) {
-		lo = hdq_read8(b, reg);
-		hi = lo < 0 ? lo : hdq_read8(b, reg + 1);
-		if (lo >= 0 && hi >= 0)
-			return lo | hi << 8;
+		before = hdq_read8(b, reg + 1);
+		if (before < 0)
+			return before;
+		low = hdq_read8(b, reg);
+		if (low < 0)
+			return low;
+		after = hdq_read8(b, reg + 1);
+		if (after < 0)
+			return after;
+		if (before == after)
+			return low | after << 8;
 	}
 	return -EIO;
 }

@@ -133,9 +133,9 @@ int main(void) {
  reset_bus(); rx_count=15; assert(hdq_read8(&b,0x14)==-EIO);
  reset_bus(); stuck_break=true;
  assert(hdq_read8(&b,0x14)==-ETIMEDOUT && tx_count==0);
- /* The unmocked 16-bit path retries incomplete UART replies. */
+ /* A transport failure is returned immediately, without retrying I/O. */
  reset_bus(); rx_count=0;
- assert(real_read16(&b,0x14)==-EIO && tx_count==24);
+ assert(real_read16(&b,0x14)==-EIO && tx_count==8);
  for (int error=0; error<9; error++) {
   b=battery(); struct hdq_battery old=b; reset_sample(); fail_at=error;
   jiffies=5*HZ; mutex_lock(&b.lock);
