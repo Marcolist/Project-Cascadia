@@ -3,7 +3,9 @@
 These are concrete Linux-C source components for review and offline testing.
 The normal Cascadia build does not descend into this directory, source these
 Kconfig fragments, create their DT nodes or install their callbacks. They have
-no supplied hardware backend or enabled configuration. No working physical
+no enabled configuration or qualified device integration. Several components
+implement actual I2C/regmap operations; their required physical ownership and
+hardware validation are still incomplete. No working physical
 charging, USB host or writable NAND result is claimed.
 
 | Component | Implemented | Deliberately still required |
@@ -65,3 +67,10 @@ kernel merely because its offline tests pass.
 Additional isolated components: [bank0](p105-bank0/EVIDENCE.md) implements Linux I2C/mutex/atomic transport with a globally owned page-selection cache; [AuthCPAID](p105-authcp-aid/AUTHENTICATION.md) implements a pure version2/3 signature-exchange state machine. Both reject unprovided ownership, preserve ambiguous faults and remain outside normal activation.
 
 [THS IDbus](p105-ths-idbus/DESIGN.md) adds the actual regmap submission/response primitive for the P10532-byte windows. It refuses unsupplied physical ownership, retains ambiguous transactions and remains unregistered/default-off.
+
+[Global PMU parent](p105-parent-pmu/EVIDENCE.md) proposes a shared regmap bus for
+the existing GPIO, regulator, WLED and shutdown consumers. It selects bank0
+under the adapter lock for every transfer, holds that lock across regmap RMW,
+and checks the separate atomic shutdown path. The replacement parent source,
+header and patch are review material only; the normal overlay is unchanged.
+This does not supply an all-ADC conversion lease or authorize charging.

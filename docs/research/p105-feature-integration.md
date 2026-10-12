@@ -119,7 +119,19 @@ any separate device-validation decision.
 
 [CDMA cancellation](../../experiments/p105-ppn/CANCELLATION.md) now supplies bounded checked transport. Its successful result remains WAIT_FENCE; only a separately qualified backend can prove no future memory accesses and drained native/Linux IRQ callbacks before any memory release. Masking an IRQ does not erase a callback already captured by the original dispatcher.
 
-[Checked bank0 transport](../../experiments/p105-bank0/EVIDENCE.md) now selects page0 only after an exclusive ALL-PMU lease, binds the cache to that owner generation, and quarantines uncertain selector/data transfers. A real parent must own every GPIO/RTC/ADC/charger/event consumer and invalidate on ownership gaps before any child can use this primitive. It is not a drop-in regmap replacement and does not prove analog protection.
+[Checked bank0 transport](../../experiments/p105-bank0/EVIDENCE.md) now selects page0 only after an exclusive ALL-PMU lease, binds the cache to that owner generation, and quarantines uncertain selector/data transfers. Its owner must cover every PMU consumer and invalidate on ownership gaps before any child can use this primitive. The current normal overlay supplies GPIO, regulator, WLED and shutdown consumers; it does not supply a PMU RTC child. The cached primitive is not a drop-in regmap replacement and does not prove analog protection.
+
+[Global PMU parent proposal](../../experiments/p105-parent-pmu/EVIDENCE.md)
+implements a separate, uncached regmap bus for those normal consumers. Each
+selector/data operation and a complete regmap read/modify/write hold the
+adapter lock. Checked prepare/seal and the atomic final shutdown avoid the
+existing direct-SMBus bypass in the opt-in proposal. STOPPED is checked before
+and after each atomic transfer; it cannot cancel hardware already executing.
+The adapter algorithm/configuration must remain unchanged and retries must
+remain zero, including against unlocked I2C-dev configuration ioctls. Raw I2C
+may run between separate regmap calls. An all-ADC conversion lease, IRQ/event
+ownership and analog safety qualification remain separate work. The proposed
+parent patch, header and Kconfig fragments are not installed by normal builds.
 
 [Remote-signature exchange](../../experiments/p105-authcp-aid/AUTHENTICATION.md) now produces bounded version2/3 nonce packets, checks actual response semantics, retains failed pending transactions and exposes only unverified bytes. Real IDbus transport, fresh nonce generation, matching certificate policy/public verification and accessory identity precede any role or electrical grant. No host-private signing operation is needed in this audited exchange/verification path; other iAP modes are outside that conclusion.
 

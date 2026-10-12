@@ -1,0 +1,13 @@
+{
+  "base_cascadia_revision": "7b560b141dfec51c949ff94536c8e38aefbc25f8",
+  "linux_revision": "adc218676eef25575469234709c2d87185ca223a",
+  "kernelcache12_sha256": "db1ddc8343aa9debc00e0a083fba59d9f555722db60957dc333b854fac21dd2c",
+  "normal_default_enabled": false,
+  "physical_charging_claim": false,
+  "regmap_fixture_sha256": "6480dab7d41910c16898d324b9c28689f958d81ddcff89d4b935ca3f53b961e0",
+  "normal_child_sources": {
+    "patches/files/drivers/video/backlight/apple-pmu-wled.c": "797d77c882d36c832085dc8e11d710da53190ea715c725095ea8c055935f6801",
+    "patches/files-sandcastle-port/drivers/regulator/apple-pmu-pwrsw.c": "2acffd17c5703b553f1cf3353c3f9a306f63a20c15ceefaa2dc64b3c0eb9b504",
+    "dts/p105ap.dts": "cc0f97f49f64b8424278c638d63f503da4424a2b5da7a605251b577062263276"
+  }
+}
