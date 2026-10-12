@@ -156,3 +156,13 @@ not establish exclusive inherited IOP/DMA ownership or prevent a later bind.
 [Actual selected kDFU sleep](p105-kdfu-sleep-boundary.md) and [FMI client retirement](p105-fmi-client-retirement.md) close concrete software edges, including final-client release before power acknowledgment. They still do not establish inherited IOP/CDMA no-future-access or IRQ drain; no MTD writer is enabled.
 
 [Checked THS transport](../../experiments/p105-ths-idbus/DESIGN.md) now supplies actual Linux regmap staged TX/control writes and bounded single-call status/bulk-RX processing. Every bus error retains UNKNOWN and pending identity; bulk data is checked before reversal/publication. A real shared IRQ/connection/request arbiter must supply physical exclusivity and late-response attribution before it can be joined to the signature parser. Pure numeric tokens and software revocation do not establish that hardware fence.
+
+[Real mathematical verification](../../experiments/p105-authcp-verify/VERIFY.md)
+now rejects corrupt reconstructed signatures using the observed native padding,
+nonce and signature-size contracts. The source nonce bytes are prehash inputs
+and must not be hashed again. Complete-C pipeline tests demonstrate rejection
+of the synthetic old-chunk substitution for both supported profiles. This is
+host-side verification against an explicitly supplied public key, with every
+result retaining unverified certificate-chain/identity and no authorization.
+It does not resolve hardware response attribution, authenticate a Camera
+Adapter, establish trusted anchors or supply VBUS. Those remain separate steps.

@@ -83,3 +83,11 @@ mutable generic retry policy. A private lockless regmap cannot escape through
 the parent's regmap lookup. Probe rollback, close, suspend and shutdown are
 checked. Physical admission remains closed: each conversion needs a new real
 quiescence witness, and no runtime producer for that witness is supplied.
+
+[Mathematical signature verifier](p105-authcp-verify/VERIFY.md) checks the
+source-backed v2 RSA1024/prehashed20 and explicitly supported v3 P-256/raw-rs/
+prehashed32 profiles. Real-crypto tests reject the substituted late signature
+chunks from the complete THS/parser pipeline. Supplied public keys remain
+untrusted: certificate-chain, accessory identity, freshness and role/current/
+VBUS authorization are not provided. This host-only component requires
+Python3.10+ and cryptography41.0.7 and is not installed in the RAM image.
