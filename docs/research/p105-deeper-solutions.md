@@ -209,3 +209,9 @@ reviewable source foundations, not enabled features or hardware-safe boot
 artifacts. The normal kernel keeps NAND read-only, gadget peripheral mode and
 the existing WLAN setup. Any device validation still requires explicit user
 approval; these local changes grant none.
+
+## Checked wall-source and cancellation transports
+
+The unregistered [wall-source candidate](../../experiments/p105-wall-source/EVIDENCE.md) implements actual Tristar routing, checked status/readback and original ADC6 classifier arithmetic. Seven complete-C sanitizer groups include72 independent original classifier comparisons, retained failed restore ownership and one-shot initialization. It returns observations only; original source profiles do not grant Linux current. A real exclusive Tristar/ADC owner and qualified restoration remain required.
+
+The unbound [CDMA cancellation candidate](../../experiments/p105-ppn/CANCELLATION.md) implements the original enable/abort/poll/disable order with fresh bounded cleanup timing and immutable ownership checks. Its9,118 C assertions include288 independent original successful write traces. Native cancellation retains callback/token and does not drain IRQs. Therefore successful transport remains WAIT_FENCE/-EINPROGRESS; no buffer release, zero-success adapter, NAND write or durability assertion is implemented.
