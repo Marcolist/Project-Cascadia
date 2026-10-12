@@ -461,7 +461,7 @@ so this is a file in build/initramfs-root owned by some third uid."
     want=$(( $(filesize "$ROOT/build/linux/arch/arm/boot/zImage") + $(filesize "$ROOT/dtb/p105ap.dtb") ))
     got=$(filesize "$ROOT/output/zImage-dtb")
     [ "$want" = "$got" ] || fail "zImage-dtb is $got bytes, expected $want"
-    in_docker "bash build-bundle.sh 2>&1 | tail -5"
+    in_docker "set -o pipefail; bash build-bundle.sh 2>&1 | tail -5"
     cp "$ROOT/output/linux-boot.bin" "$ROOT/output/staging-loader.bin"
     bs=$(filesize "$ROOT/output/staging-bundle.bin")
     [ "$bs" = "$(( got + 32768 ))" ] || fail "staging-bundle.bin is $bs bytes, expected $(( got + 32768 ))"

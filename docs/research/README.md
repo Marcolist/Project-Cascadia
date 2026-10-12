@@ -94,3 +94,9 @@ in the source repository.
 - [PPN durability: primary sources and E9 scope](p105-ppn-durability-primary.md) — commit/status comparison; no physical receipt or writable backend.
 
 - [USB PHY clock source in the actual boot code](p105-usb-boot-frequency.md) — independent12H/13G producer evidence; no live clock binding.
+
+* [Actual P105 PMGR44 diagnostic table ABI](p105-pmgr-table-abi.md) — corrected
+  offline mapper and original-blob negative control; no clock activation.
+
+* [Staging loader stack reservation](p105-staging-stack.md) — ARM prologue
+  negative control and linker overlap rejection; offline only.
