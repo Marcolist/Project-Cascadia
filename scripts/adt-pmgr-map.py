@@ -11,7 +11,7 @@ per clock and per gateable device, and each one says where its registers are.
     +0x04  u32   flags
     +0x08  4     up to four parent clock ids, one per byte
     +0x0c  u32   index of the power-state register: PMGR + 0x1000 + idx * 4
-    +0x10  u32   index of the clock register:       PMGR + 0x0000 + idx * 4
+    +0x10   4    packed clock codes; direct code index uses PMGR + 0x38 + idx * 4
     +0x14   8    two additional words (not decoded here)
     +0x1c  16    name
 
@@ -65,13 +65,14 @@ def adt_nodes(data):
 def peek_dump(path):
     """{address: 'xxxxxxxx'} out of `peek r` output"""
     words = {}
-    for line in open(path):
-        m = re.match(r'^([0-9a-f]{8}): ((?:[0-9a-f-]{8} ?)+)$', line.strip())
-        if not m:
-            continue
-        base = int(m.group(1), 16)
-        for i, w in enumerate(m.group(2).split()):
-            words[base + 4 * i] = w
+    with open(path) as dump:
+        for line in dump:
+            m = re.match(r'^([0-9a-f]{8}): ((?:[0-9a-f-]{8} ?)+)$', line.strip())
+            if not m:
+                continue
+            base = int(m.group(1), 16)
+            for i, w in enumerate(m.group(2).split()):
+                words[base + 4 * i] = w
     return words
 
 
@@ -104,6 +105,27 @@ def device_clock_entries(data, entry_size=ENTRY):
     return entries
 
 
+def clock_registers(packed, entry_size=ENTRY):
+    """Direct P105 44-byte clock path; encoded/older formats stay explicit."""
+    if entry_size not in (36, 44) or not 0 <= packed <= 0xffffffff:
+        raise ValueError("invalid clock word or device-clock ABI")
+    if entry_size == 36:
+        return (), 'unverified' if packed else None
+    codes = packed.to_bytes(4, 'little')
+    # Original startup checks every code, even after an earlier terminator.
+    if any((code & 0x3c) >= 0x34 for code in codes):
+        return (), 'invalid'
+    addresses = []
+    for code in codes:
+        index = code & 0x3f
+        if not index:
+            break
+        if code & 0xc0:
+            return tuple(addresses), 'encoded:%02x' % code
+        addresses.append(PMGR + 0x38 + 4 * index)
+    return tuple(addresses), None
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('dt', nargs='?', default='ibootfiles/DeviceTree.raw')
@@ -126,17 +148,28 @@ def main():
                                           'live' if live else ''))
     for cid, w, name in entries:
         gate = PMGR + 0x1000 + w[3] * 4 if 0 < w[3] < 0x400 else None
-        clock = PMGR + w[4] * 4 if 0 < w[4] < 0x400 else None
+        clocks, clock_annotation = clock_registers(w[4], args.entry_size)
+        clock = clocks[0] if clocks else None
+        clock_text = ','.join('%08x' % address for address in clocks)
+        if clock_annotation:
+            clock_text += ('/' if clock_text else '') + clock_annotation
+        clock_text = clock_text or '-'
+        gate_text = '%08x' % gate if gate else '-'
+        if args.entry_size == 44 and clock_annotation == 'invalid':
+            gate = None
+            gate_text = 'invalid-row'
         note = ''
         if live and gate:
             note = state(live.get(gate))
         elif live and clock:
             v = live.get(clock)
             note = ('= %s' % v) if v and v != '00000000' else 'reads zero'
+        if args.entry_size == 36 and gate:
+            note += ('; ' if note else '') + '36-byte gate address unverified'
         print('%-14s %3d  %-10s %-10s  %s' % (
             name, cid,
-            '%08x' % gate if gate else '-',
-            '%08x' % clock if clock else '-',
+            gate_text,
+            clock_text,
             note))
 
 

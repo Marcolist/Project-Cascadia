@@ -33,9 +33,11 @@ The existing standalone ADT walker is unchanged; this fix is scoped to
 `device-clocks` table decoding, not a general ADT parser replacement.
 
 Historical control is the **actual original repository blob**
-42bec65d851f0b2f5a09ee57294a4a3902d104bc. Tests retrieve local blob with
-`protocol.allow=never`, GIT_NO_LAZY_FETCH and exact blob hash check: no network
-transport, missing pinned blob fails. No handwritten legacy implementation.
+42bec65d851f0b2f5a09ee57294a4a3902d104bc, preserved exactly as
+`tests/fixtures/p105-pmgr44/historical-36-map.py`. Tests independently verify
+its Git blob hash before executing it against a synthetic input. No Git history,
+network transport or external device is required; shallow clones/source archives
+can run the same negative control. A wrong historical fixture fails.
 A normalized source-bound subset of eight original rows is encoded as a
 synthetic ADT for portable tests; it contains metadata only, not firmware bytes.
 Six tests PASS/no skips, including old mapper missing USB-EHCI versus candidate
@@ -46,7 +48,7 @@ Actual complete static table CLI output also parses all116 entries successfully.
 
 Relevant parent dependencies, decoded only (not activated):
 USB-EHCI89 parents[40,0,0,0]; USB-PHY87 parents[40,42,0,0]; USBREG42 gateindex38
-(PMGR+1098), clockindex45 (+0xb4). These make clear that leaf ID87's zero
+(PMGR+1098), clockindex45 (native +0xec; see the clock-column correction). These make clear that leaf ID87's zero
 register does not mean all its **parent** clock/supply prerequisites are absent.
 This table alone does not authorize parent-gate writes or prove native parent
 ownership/release graph closure. Clock interface dynamic provider remains open.

@@ -124,7 +124,7 @@ per clock and per gateable device.
     +0x04  u32   flags
     +0x08  4     up to four parent clock ids, one per byte
     +0x0c  u32   index of the power-state register: PMGR + 0x1000 + idx * 4
-    +0x10  u32   index of the clock register:       PMGR + idx * 4
+    +0x10  4     packed clock codes; direct index: PMGR + 0x38 + idx * 4
     +0x14   8    two additional words (not decoded by the mapper)
     +0x1c  16    name
 
@@ -135,6 +135,18 @@ ADT has 5104 bytes, giving 116 entries. The older 36-byte/name-at-20 mapper
 misaligned this input; `--entry-size 36` is now an explicit compatibility
 option, while P105 uses 44 by default. This is an offline diagnostic fix,
 not a clock/power-enable change.
+
+The native direct-clock path (`0x80b8cd4c..0x80b8cd7a`) retains the
+provider mapping without a base adjustment and adds `0x38 + 4*index`. Each
+packed byte has a low-six-bit index; index zero terminates this direct path,
+and either high flag bit ends it without certifying a direct address. Startup
+checks all four bytes and rejects indices >=52; deferred direct iteration is
+1..51. USBREG id42 therefore has clock index45 at `0x3f1000ec`, while its
+power gate remains index38 at `0x3f101098`. UPERF id40 clock index25 is
+`0x3f10009c`. The mapper marks encoded or invalid codes and leaves the explicit
+36-byte compatibility ABI's physical clock/gate interpretation unverified.
+Actual original-code traces and synthetic negative controls are recorded in
+`p105-native-clock-physical.md`; no device access is required for this correction.
 
 `scripts/adt-pmgr-map.py` prints it, and with a `peek r 3f100000 7168` dump as a
 second argument it prints the live value beside each name. It agrees with the
@@ -158,6 +170,9 @@ machine iBoot hands over:
 - **no register at all**: CLCD, RGBOUT, ISP, the DARTs, CPU0/CPU1 -- their
   entries carry a zero index, which is why that whole group read as holes.
 
-And the PWM's clock, which had been the other suspect, is not the problem: its
-parent by the table is PCLK3 at `0x3f100094`, reading `0x90000004` -- enabled,
-divider 4 -- since before Linux started.
+The earlier `0x3f100094 = 0x90000004` observation is a historical read,
+but the old clock-column arithmetic does not establish its PCLK3 identity.
+The pinned native table assigns PCLK3 direct clock index37, hence
+`0x3f1000cc`; that corrected address has no new live measurement here.
+Clock state and the PWM-parent claim require verification at the corrected
+address rather than reinterpretation of the old read.

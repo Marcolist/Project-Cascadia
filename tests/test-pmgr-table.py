@@ -13,8 +13,7 @@ class Table(unittest.TestCase):
  @classmethod
  def setUpClass(cls):
   spec=importlib.util.spec_from_file_location('candidate',ROOT/'scripts/adt-pmgr-map.py');cls.mapper=importlib.util.module_from_spec(spec);spec.loader.exec_module(cls.mapper)
-  repo=Path(os.environ.get('CASCADIA_TEST_REPO',Path.cwd()));env={**os.environ,'GIT_NO_LAZY_FETCH':'1'}
-  raw=subprocess.run(['git','-c','protocol.allow=never','cat-file','blob',BLOB],cwd=repo,env=env,check=True,capture_output=True).stdout
+  raw=(HERE/'historical-36-map.py').read_bytes()
   assert hashlib.sha1(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest()==BLOB
   cls.original={'__name__':'legacy_control'};exec(compile(raw,'pinned-original-adt-pmgr-map.py','exec'),cls.original)
   cls.fixture=json.loads((HERE/'oracle-pmgr-subset.json').read_text());cls.table=b''.join(struct.pack('<7I',*row['words'])+row['name'].encode().ljust(16,b'\0')for row in cls.fixture['subset_rows'])
@@ -51,7 +50,7 @@ class Table(unittest.TestCase):
    with self.assertRaises(ValueError):self.mapper.device_clock_entries(self.table,stride)
  def test_gate_and_clock_zero_indices_are_unmapped(self):
   rows=self.mapper.device_clock_entries(self.table);phy=[entry for entry in rows if entry[0]==87][0];self.assertEqual(phy[1][3:5],(0,0))
-  reg=[entry for entry in rows if entry[0]==42][0];self.assertEqual(reg[1][3:5],(38,45));output=self.output(self.mapper.main,self.table);self.assertIn('3f101098',output);self.assertIn('3f1000b4',output)
+  reg=[entry for entry in rows if entry[0]==42][0];self.assertEqual(reg[1][3:5],(38,45));output=self.output(self.mapper.main,self.table);self.assertIn('3f101098',output);self.assertIn('3f1000ec',output)
  def test_original_kernel_count_oracle_establishes44_not36(self):
   oracle=json.loads((HERE/'oracle-count.json').read_text());self.assertEqual(oracle['source_sha256'],'db1ddc8343aa9debc00e0a083fba59d9f555722db60957dc333b854fac21dd2c')
   case=[entry for entry in oracle['count_cases']if entry['OSData_length']==5104][0];self.assertEqual(case['actual_count'],116);self.assertEqual(self.fixture['actual_entry_size'],44)
