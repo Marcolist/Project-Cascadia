@@ -92,3 +92,22 @@ This is an object check, not a complete linked driver or runtime hardware test.
 Portable reproduction: `python3 tests/test-experimental-usb-controller.py`.
 Only actual C with explicit fake Regmap/mutex/epoch providers is executed.
 No controller/role/DT registration, native VBUS or first-boot claim is supplied.
+
+
+## Retained controller readiness loss
+
+Cold asserted-reset/unfinished-gate observations remain ordinary EBUSY/EHOSTDOWN
+admission errors before writes. After a completed/touched controller operation,
+the same observations now latch the original error and retain pending/completed
+metadata. Merely restoring ready register bits cannot reuse the old context or
+trigger another reset/mux operation. This closes a gap in the retained-owner
+failure policy; it does not prove why real hardware lost readiness.
+
+The preserved historical actual gate_ready function is SHA-pinned. Host controls
+reproduce six prior same-context replay paths, then exercise six fixed retained
+refusals and six cold admission/retry paths using actual complete controller C
+and explicitly fake registers/owner/epoch providers. Sanitizers check host C only.
+No physical USB, reset, power, WLAN, iPad or native kernel execution occurs.
+Repeat with `python3 tests/test-usb-controller-readiness.py`. The source remains
+uninstalled and denied by default; a separately reviewed owner transaction is
+still required for recovery from a retained fault.

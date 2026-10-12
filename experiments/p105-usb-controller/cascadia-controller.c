@@ -104,11 +104,15 @@ static int gate_ready(struct cascadia_controller *c, u64 epoch,
 	if (ret)
 		return fault(c, ret);
 	if (*value & RESET_BIT)
-		return -EBUSY;
+		ret = -EBUSY;
 	/* Target and acknowledgement nibbles must both be on (0xf). */
-	if ((*value & 0xff) != 0xff)
-		return -EHOSTDOWN;
-	return 0;
+	else if ((*value & 0xff) != 0xff)
+		ret = -EHOSTDOWN;
+	else
+		return 0;
+	/* A completed/touched owner cannot adopt an intervening reset/gate gap
+	 * by retrying the same lease when the register later looks ready. */
+	return (c->touched || c->completed_operations) ? fault(c, ret) : ret;
 }
 
 static int complete(struct cascadia_controller *c, u64 epoch)
