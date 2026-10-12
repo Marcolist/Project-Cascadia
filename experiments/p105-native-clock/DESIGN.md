@@ -18,8 +18,9 @@ blocks. Original constructed Performance vptr80b90938 +350→804b3141,
 PMGR provider mapping at+self550 is unchanged, actual physical reg[0]3f100000.
 This does not resolve the USB-complex's dynamically supplied platform pointer.
 The actual clkG forwarder reaches this graph through a CommandGate; the earlier
-804b56d4 opcode decoder is cpuI, not clkG. Registry association and inherited
-global adoption still need separate proof.
+804b56d4 opcode decoder is cpuI, not clkG. The [true clkG factory and bridge](../../docs/research/p105-true-clkg.md)
+now have public bounded original-instruction regression coverage. Registry
+association and inherited global adoption still need separate proof.
 
 Source-bound nodes are2/3/4/5(PREDIV),40(UPERF),42(USBREG),87(PHY),89(EHCI).
 Roots87/89 >=56 have native idempotent active bits; parents<56 have counts,

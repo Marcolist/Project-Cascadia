@@ -119,3 +119,6 @@ in the source repository.
 * [Checked native host clock broker](../../experiments/p105-native-clock/DESIGN.md)
   — actual parent graph, shared client accounting and retained fault state;
   default denied, global-owner adoption still required.
+
+* [True clkG factory and native parent bridge](p105-true-clkg.md) — actual
+  original dispatch and CPU-idle negative control; registry association separate.
