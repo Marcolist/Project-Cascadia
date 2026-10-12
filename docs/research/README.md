@@ -159,3 +159,5 @@ in the source repository.
 * [Remote accessory signature exchange](../../experiments/p105-authcp-aid/AUTHENTICATION.md) and [original verifier control flow](../../experiments/p105-authcp-aid/CRYPTO_BOUNDARY.md) — unverified bytes, fake crypto, no role/current grant.
 
 * [Actual selected kDFU sleep request](p105-kdfu-sleep-boundary.md) and [FMI client retirement](p105-fmi-client-retirement.md) — original software ordering without physical DMA/IRQ fence.
+
+* [Retained DMA diagnostics](p105-retained-dma-diagnostics.md) — blocked program/erase calls preserve buffer-retention warnings without attempting new hardware work.

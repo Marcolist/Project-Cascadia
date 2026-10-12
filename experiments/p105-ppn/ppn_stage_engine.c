@@ -209,6 +209,8 @@ static int begin(struct ppn_stage_engine *e, u64 timeout, struct ppn_stage_resul
 		return -EINVAL;
 	memset(r, 0, sizeof(*r));
 	r->durability_unknown = true;
+	/* Rejected retries must preserve the held-buffer retention warning. */
+	r->unquiesced_dma = !!(e->data_lease || e->meta_lease);
 	if (!e->bound || !e->ops)
 		return -ENODEV;
 	if (e->blocked)

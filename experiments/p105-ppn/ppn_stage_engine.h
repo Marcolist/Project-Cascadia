@@ -81,7 +81,7 @@ struct ppn_stage_address {
 struct ppn_stage_result {
 	bool transport_complete; /* Does NOT imply persistent completion. */
 	bool durability_unknown; /* Always true in this staged engine. */
-	bool unquiesced_dma; /* Caller MUST retain buffers while true. */
+	bool unquiesced_dma; /* Caller MUST retain buffers while true, even on a rejected retry. */
 	int cleanup_error;
 	u8 raw_status;
 	bool list_valid[3];
@@ -97,6 +97,10 @@ struct ppn_stage_engine {
 };
 /* Caller initializes engine to zero exactly once and holds one controller lock.
  * Rebinding an initialized engine is refused. There is no clear-blocked/resetAPI.
+ * A rejected call reports previously held DMA leases in unquiesced_dma. Its
+ * cleanup_error describes this call only; zero does not clear prior ownership.
+ * Inputs, outputs, engine and borrowed buffers must be nonaliasing regular memory
+ * and immutable while in use; callbacks must not reenter or mutate the engine.
  */
 int ppn_stage_bind(struct ppn_stage_engine *engine, const struct ppn_stage_ops *ops,
 		   void *ctx, const struct ppn_stage_geometry *geometry);
