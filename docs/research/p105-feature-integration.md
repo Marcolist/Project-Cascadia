@@ -176,3 +176,16 @@ built-in-only and forbids retired-master re-registration. It requires generic
 MTD API review and a complete integration build before normal activation;
 neither the normal overlay nor the prepared RAM baseline installs it. There
 are no program/erase callbacks, NAND-write grant or inherited DMA/IRQ fence.
+
+Further original-code evidence narrows the still-missing interfaces:
+[ADC/event retirement](../../experiments/p105-adc-native-retirement/FINDINGS.md)
+shows actual queued work surviving event-source disable, cached completion with
+fresh zero event bytes, and ignored transport failure. Its13G constructor/getter
+proof selects the legacy acquisition slot for the constructed D1946 class;
+generic start/stop slots are zero-return stubs, not hardware stop witnesses.
+[iAP policy facets](../../experiments/p105-iap-native-policy/IAP_TRUST_INTERFACE.md)
+trace actual custom-anchor selection and native weak-key/parent/failure rules.
+The source v3 anchor lacks BasicConstraints and carries a critical Apple OID;
+an explicit anchor is exempt from the proven parent CA/KU checks. Complete
+path/critical-extension/date behavior and a real accessory chain remain required
+before a native-profile trust claim. Neither evidence group opens a hardware gate.

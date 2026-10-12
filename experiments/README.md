@@ -98,3 +98,17 @@ reads on removal, and opts out of the unretained regular-NVMEM path. Its generic
 MTD core/header patch supports built-in core/providers only. This proposal is
 not installed by normal builds; it neither enables NAND writes nor supplies an
 inherited IOP/CDMA hardware fence.
+
+[Native ADC retirement evidence](p105-adc-native-retirement/FINDINGS.md) traces
+the actual event-source/provider chain and selected12H/13G ADC callbacks.
+Disabling the event source does not drain queued work; cached events and ignored
+read errors can complete a software ADC state. Source getter/constructor dispatch
+does not prove the live device's IOKit selection or physical converter retirement.
+
+[Native iAP policy facets](p105-iap-native-policy/IAP_TRUST_INTERFACE.md) expose
+the actual anchor-selection, weak-key and securityd parent/policy boundaries.
+Real source-anchor metadata/self-signature inspection is separate from the
+synthetic certificate/CF providers in native emulation. No complete peer-chain
+trust validator or accessory/current/VBUS grant is supplied. These source-only
+replays require the caller's SHA-pinned official input files and are optional;
+their independent native controls are not added to the ordinary offline count.
