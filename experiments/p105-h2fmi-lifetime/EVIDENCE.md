@@ -128,3 +128,42 @@ resource controls. No git history or normal build tree mutation is required.
 The second runner exercises the actual new read wrapper with unchanged Linux
 MEMREAD helpers and needs the existing pinned local Linux source tree.
 No whole-kernel link or runtime activation is claimed by the object builds.
+
+## Failed partition publication and final release
+
+Initialized opt-in partitions now retain a constructor device reference through
+attributes, subpartition parsing and the caller's last offset access. Failure
+unlinks before dropping it; earlier failures and non-opt-in callers retain their
+existing allocation path. Nested parent devices stay explicitly retained.
+Final cleanup with a retained driver context runs from embedded work under the
+MTD table mutex, preserving the ID reservation until cleanup and avoiding
+recursive lock acquisition from synchronous device-release callbacks. A
+pre-publication failed get has no driver reference and its constructor's final
+put holds the table mutex directly. Unregistered opt-in devices reject new gets.
+
+Actual core/partition C controls cover synchronous/delayed failed publication,
+single and array callers, nested parents, unregistered-parent and early errors,
+parser removal before final offset access, parse rollback and ordinary non-opt-in
+get/put/unregister. Historical failed allocation uses logical retirement and
+quarantined owned storage; no real invalid access or hardware/kernel execution
+is performed. Workqueue/device/allocator/list providers remain explicit host
+models, separate from actual ARM header/object and complete-link qualification.
+No physical IOP/DMA fence, write operation or normal-image activation is supplied.
+
+
+Root integration of this follow-up independently compiles three selected ARM
+objects (H2FMI, MTD core and partition) with the updated header under `-Werror`.
+A separate private full kernel compile/link also passes with normal flags,
+reusing cached baseline objects. This incremental update emits no new warnings;
+the preceding full qualification recorded 18 existing missing-prototype warnings.
+It has no userspace initramfs and is not a boot-test image. The portable partition
+runner covers 11 fixed cases plus two quarantined historical controls for each
+PARTITIONED_MASTER configuration. These modeled workqueue cases do not prove
+physical DMA retirement. Repeat with:
+
+    python3 tests/test-h2fmi-partitions.py
+
+The updated four-source private installer passes 24 filesystem regression
+controls and nine portable actual-Git boundary controls. Older 11 historical/fixed
+containment controls remain evidence for the preceding installer revision; they
+are not counted as a fresh run of this revision.

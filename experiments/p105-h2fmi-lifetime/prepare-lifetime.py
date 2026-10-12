@@ -14,19 +14,21 @@ PURPOSE = 'offline-h2fmi-lifetime-complete-link'
 ACK = '.cascadia-lifetime-tree.json'
 RECEIPT = '.cascadia-lifetime-install.json'
 PROPOSAL_HASHES = {
-    'source-provenance.json': 'e82dbc04e44db0dd11f3f64453afd9d6d7ed72ead6822a689c583bf3293aa6d7',
-    'mtd-context-lifetime.patch': 'e111529ec786ffb86b3c3e15e0bd861f3dbc6ddd41df8357a720ef78c278df94',
+    'source-provenance.json': '9234adbe00ce559d6e58b51b6e1e90261b24f019ccc40ef2aec5f7ea66cb0494',
+    'mtd-context-lifetime.patch': 'df1ed9aaedc712a82f98f02876575372d41946a659fb0bf8f1807c34981b8041',
     'mtd-apple-h2fmi.c': 'cab5b9a796d0d8e67f6484c6e51ba0839eb5a69f313257ba06ec74c536eb06fa',
 }
 BASELINE = {
     'drivers/mtd/devices/mtd-apple-h2fmi.c': '820ce09ca39bef023ec4289f05bc2110d5e415b48e0a6f1d43b503dead83a58a',
     'drivers/mtd/mtdcore.c': 'a14842ae73acebc5601e74bcbde1b2dfac594979fd2512a38ea30d406b57540e',
     'include/linux/mtd/mtd.h': '7ffee580bb12556e4074f07e6fdf13d56d9a5ca18d2eb69ebb4d3c0c9896badb',
+    'drivers/mtd/mtdpart.c': '33f69ba6f9d8ff0445790b8d7cf5bf279dfe79856a0dc362bd9a8e8dd7c89a8f',
 }
 INSTALLED = {
     'drivers/mtd/devices/mtd-apple-h2fmi.c': PROPOSAL_HASHES['mtd-apple-h2fmi.c'],
-    'drivers/mtd/mtdcore.c': 'ff78cbff164d983cda7faf06f73260212a565fc6369e486fd35bbf39b5457199',
-    'include/linux/mtd/mtd.h': 'e6653d00dcbe3f79f96c215b1db5f6d303a3423e68bc67a0593ca87c36b26d83',
+    'drivers/mtd/mtdcore.c': 'fc6b3a8056d16832e014fe4cffdb4bc091afde5948ba7a469e371686450590d4',
+    'include/linux/mtd/mtd.h': '2ced38a2a796b13a5bfcc0492972683d8dddc4c9fecbde501baba715ee7d3aa9',
+    'drivers/mtd/mtdpart.c': '8adbf30aea21f169a18dffb32a9f0d90236dd302d7d92dea903c363e8431fb5e',
 }
 MAKEFILE_HASH = '96ec6a92139d7af01fa3c4be4f8f521f86f48d249861c578dc00f4ff38df1b61'
 REQUIRED = ('CONFIG_ARM', 'CONFIG_ARCH_APPLE_S5L', 'CONFIG_MTD', 'CONFIG_MTD_APPLE_H2FMI')

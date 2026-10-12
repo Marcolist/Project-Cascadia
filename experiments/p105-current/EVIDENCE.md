@@ -187,3 +187,15 @@ The current-only prototype restricts enabling to nominal input profiles of at
 least1000mA as an experimental policy. The traced owner+0x1d0 consumer compares
 an accumulated value, not a directly proven USB-budget minimum. This restriction
 is not evidence that500mA cannot physically trickle-charge the battery.
+
+## Zero requests before event activation
+
+A ready inactive frontend previously accepted zero-current/zero-input writes,
+but its disabled queue never applied them. It now returns-EAGAIN before changing
+requested values; it does not enable IRQs or add a PMU operation for that request.
+Active zero remains asynchronous. Four actual setter/queue/worker groups plus
+the retained old-setter assertion control cover this path; the independent
+export also seeds prior nonzero requested values to verify preservation. The
+actual current core is compiled into the fixture; source/IRQ/bus providers are
+synthetic. This fixes an unapplied-success report and proves no physical inhibit,
+charging or supplier permission. The experiment remains uninstalled/default-off.

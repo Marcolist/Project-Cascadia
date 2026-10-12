@@ -2,7 +2,7 @@
 
 prepare-lifetime.py is an optional source installer/checker. It has no build,
 flash, boot, device, service, mount or normal-image publishing operation.
-Default is read-only checking; --apply changes exactly the three proposal sources
+Default is read-only checking; --apply changes exactly the four proposal sources
 inside an explicitly acknowledged private prepared tree.
 
 ## Preconditions
@@ -60,10 +60,10 @@ python3 "$PROTECTED_REPO/experiments/p105-h2fmi-lifetime/prepare-lifetime.py" \
 
 The checker refuses the actual checkout or its ancestors, symlink paths, nonowned
 or multiply linked source files, unknown/mixed inputs and unowned/incomplete
-receipts. It reconstructs the core/header patch in temporary private staging,
+receipts. It reconstructs the core/header/partition patch in temporary private staging,
 checks all final hashes before publication, then records its install.
 An already installed tree with its complete owned receipt is idempotent and is
-not rewritten. Replacements are atomic per file, NOT crash-atomic across all three
+not rewritten. Replacements are atomic per file, NOT crash-atomic across all four
 files. An interrupted/mixed state remains refused; there is no automatic recovery,
 reset, deletion or attempt to repair a normal tree. Deliberately prepare a fresh
 private snapshot instead. The component's original source-provenance.json is not
@@ -122,3 +122,5 @@ captured by process-local make/gcc stubs; an env-cleared manual call excludes th
 No GNU Make, compiler, kernel/device build or normal-tree mutation runs in these
 containment fixtures. The kernel Makefile's actual KBUILD_OUTPUT routing supplies
 the independent source explanation; fake routing is not a hardware/build result.
+
+The corrected proposal also changes mtdpart.c. Older three-source receipts/snapshots are intentionally refused by this version; prepare a fresh reviewed private snapshot rather than silently upgrading it. The root-reviewed independent qualification uses its own private source-update record and preserves the earlier tree.

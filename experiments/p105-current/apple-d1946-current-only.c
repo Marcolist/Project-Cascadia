@@ -475,7 +475,12 @@ static int d_set(struct power_supply *psy, enum power_supply_property property,
 	mutex_lock(&d->io_lock);
 	if (d->stopping || (ma && d->fault_latched))
 		ret = -EIO;
-	else if (!READ_ONCE(d->ready))
+	/* An inactive bind has no worker/event owner applying a zero request.
+	 * Report it as unapplied; do not enable IRQs solely for an inhibit. */
+	else if (!READ_ONCE(d->ready) ||
+		 (!ma && !READ_ONCE(d->events_enabled) &&
+		  (property == POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT ||
+		   property == POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT)))
 		ret = -EAGAIN;
 	else if (property == POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT)
 		d->requested_input = ma;

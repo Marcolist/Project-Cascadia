@@ -58,9 +58,34 @@ static void up_read(struct rw_semaphore *s) { assert(!pthread_rwlock_unlock(&s->
 static void down_write(struct rw_semaphore *s) { assert(!pthread_rwlock_wrlock(&s->lock)); }
 static void up_write(struct rw_semaphore *s) { assert(!pthread_rwlock_unlock(&s->lock)); }
 struct mutex { pthread_mutex_t lock; };
+static struct mutex mtd_table_mutex;
+static _Thread_local bool fake_table_owned, fake_work_draining;
+static void fake_drain_work(void);
+struct work_struct { void(*fn)(struct work_struct *); bool queued; };
+#define INIT_WORK(w,f) ((w)->fn=(f),(w)->queued=false)
+static struct work_struct *fake_work_queue[128];
+static unsigned fake_work_count;
+static pthread_mutex_t fake_work_lock=PTHREAD_MUTEX_INITIALIZER;
+static bool schedule_work(struct work_struct *w) {
+ pthread_mutex_lock(&fake_work_lock);assert(!w->queued&&fake_work_count<128);
+ w->queued=true;fake_work_queue[fake_work_count++]=w;pthread_mutex_unlock(&fake_work_lock);
+ if(!fake_table_owned)fake_drain_work();
+ return true;
+}
+static void fake_drain_work(void) {
+ if(fake_work_draining)return;
+ fake_work_draining=true;
+ for(;;){pthread_mutex_lock(&fake_work_lock);
+  if(!fake_work_count){pthread_mutex_unlock(&fake_work_lock);break;}
+  struct work_struct*w=fake_work_queue[0];memmove(fake_work_queue,fake_work_queue+1,--fake_work_count*sizeof(*fake_work_queue));
+  w->queued=false;void(*fn)(struct work_struct*)=w->fn;pthread_mutex_unlock(&fake_work_lock);fn(w);
+ }
+ fake_work_draining=false;
+}
+
 static void mutex_init(struct mutex *m) { assert(!pthread_mutex_init(&m->lock,NULL)); }
-static void mutex_lock(struct mutex *m) { assert(!pthread_mutex_lock(&m->lock)); }
-static void mutex_unlock(struct mutex *m) { assert(!pthread_mutex_unlock(&m->lock)); }
+static void mutex_lock(struct mutex *m) { assert(!pthread_mutex_lock(&m->lock));if(m==&mtd_table_mutex)fake_table_owned=true; }
+static void mutex_unlock(struct mutex *m) { if(m==&mtd_table_mutex)fake_table_owned=false;assert(!pthread_mutex_unlock(&m->lock));if(m==&mtd_table_mutex)fake_drain_work(); }
 typedef struct { int locked; } spinlock_t;
 static void spin_lock_init(spinlock_t *s) { s->locked=0; }
 static void spin_lock(spinlock_t *s) { assert(!s->locked);s->locked=1; }
@@ -90,7 +115,7 @@ struct mtd_info {
  int(*_get_device)(struct mtd_info*);void(*_put_device)(struct mtd_info*);
  int(*_read_oob)(struct mtd_info*,loff_t,struct mtd_oob_ops*);
  int(*_block_isbad)(struct mtd_info*,loff_t);
- bool no_nvmem,retain_device_context,driver_device_ref;void(*_reboot)(void);struct {void(*notifier_call)(void);} reboot_notifier;
+ bool no_nvmem,retain_device_context,driver_device_ref,partition_constructor_ref;struct device *driver_parent_ref;struct work_struct device_release_work;void(*_reboot)(void);struct {void(*notifier_call)(void);} reboot_notifier;
  struct nvmem_device *nvmem,*otp_user_nvmem,*otp_factory_nvmem;
 };
 /* DRIVER_STRUCTS */
@@ -144,6 +169,7 @@ static void *dev_get_drvdata(struct device*d){return d->data;}
 static void idr_remove(void*p,int i){(void)p;assert(i>=0&&i<8);table[i]=NULL;core_releases++;}
 static void of_node_put(struct device_node*n){(void)n;}
 static unsigned partition_releases;
+static void free_partition(struct mtd_info*m){kfree(m->name);kfree(m);}
 static void release_mtd_partition(struct mtd_info*m){partition_releases++;kfree(m->name);kfree(m);}
 static int mtd_class;
 static void device_destroy(void*c,dev_t dev){(void)c;(void)dev;}
@@ -151,7 +177,7 @@ static void debugfs_remove_recursive(void*p){(void)p;}
 static void nvmem_unregister(struct nvmem_device*n){(void)n;}
 static void mtd_release(struct device*);
 static unsigned device_releases;
-static void get_device(struct device*d){assert(d->refs);d->refs++;}
+static struct device *get_device(struct device*d){assert(d->refs);d->refs++;return d;}
 static void put_device(struct device*d){assert(d->refs);if(!--d->refs){device_releases++;mtd_release(d);}}
 static void device_unregister(struct device*d){d->registered=false;put_device(d);}
 static bool device_is_registered(struct device*d){return d->registered;}
@@ -248,7 +274,11 @@ static void partition_controls(struct platform_device *dev,unsigned *cases){
  fresh();assert(!h2fmi_probe(dev));struct h2fmi*f=dev->data;struct mtd_info*m=&f->mtd[0];
  struct mtd_info *child=kzalloc(sizeof(*child),0);assert(child);child->parent=m;child->name=kasprintf(0,"partition%d",0);child->writesize=m->writesize;child->erasesize=m->erasesize;child->flags=m->flags;child->size=m->size;child->_read_oob=m->_read_oob;
  unsigned nvmem_before=nvmem_registrations;(void)nvmem_before;
- assert(!add_mtd_device(child));partition_child=child;
+ assert(!add_mtd_device(child));
+#ifndef HISTORICAL_CONTROL
+ put_partition_constructor(child);
+#endif
+ partition_child=child;
 #ifndef HISTORICAL_CONTROL
  assert(nvmem_registrations==nvmem_before); /* master opt-out covers child */
 #endif

@@ -9,6 +9,8 @@ import subprocess
 import tempfile
 
 HISTORICAL_HASHES = {
+    'original-mtdpart.c': '33f69ba6f9d8ff0445790b8d7cf5bf279dfe79856a0dc362bd9a8e8dd7c89a8f',
+    'prior-lifetime-mtdcore.c': 'ff78cbff164d983cda7faf06f73260212a565fc6369e486fd35bbf39b5457199',
     'original-h2fmi.c': '820ce09ca39bef023ec4289f05bc2110d5e415b48e0a6f1d43b503dead83a58a',
     'original-mtdcore.c': 'a14842ae73acebc5601e74bcbde1b2dfac594979fd2512a38ea30d406b57540e',
 }
@@ -56,13 +58,17 @@ def function(source, name):
     raise ValueError('unterminated function: ' + name)
 
 
-def fixture(template, driver, core, historical):
+def fixture(template, driver, core, historical, part=None):
     geometry = driver[driver.index('#define H2FMI_BUSES'):driver.index('/* The ADT')]
     registers = driver[driver.index('#define H2FMI_CE'):driver.index('/* The allowlist is')]
     structures = driver[driver.index('struct h2fmi_bus {'):driver.index('/*\n * h2fmi_wait')]
     source = template.replace('/* GEOMETRY */', geometry + registers)
     source = source.replace('/* DRIVER_STRUCTS */', structures.replace('__iomem', ''))
-    bodies = [function(core, name) for name in CORE_FUNCTIONS]
+    bodies = [function(core, name) for name in (CORE_FUNCTIONS if historical else ['mtd_release_final','mtd_release_work',*CORE_FUNCTIONS])]
+    if not historical:
+        if part is None:
+            raise ValueError('candidate partition source required')
+        bodies.insert(0,function(part,'put_partition_constructor'))
     names = ['h2fmi_split_page', 'h2fmi_read_page_at',
              'h2fmi_bitflips', 'h2fmi_account_ecc']
     if not historical:
@@ -107,7 +113,8 @@ def main():
         with tempfile.TemporaryDirectory(prefix='h2fmi-core-reconstruction-') as temp:
             temp = Path(temp)
             for name, baseline in [('drivers/mtd/mtdcore.c', 'original-mtdcore.c'),
-                                   ('include/linux/mtd/mtd.h', 'original-mtd.h')]:
+                                   ('include/linux/mtd/mtd.h', 'original-mtd.h'),
+                                   ('drivers/mtd/mtdpart.c','original-mtdpart.c')]:
                 destination = temp / name
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 destination.write_bytes((fixtures / baseline).read_bytes())
@@ -115,6 +122,8 @@ def main():
                             str((experiment / 'mtd-context-lifetime.patch').resolve())],
                            cwd=temp, check=True)
             core_source = (temp / 'drivers/mtd/mtdcore.c').read_text()
+            if (temp / 'drivers/mtd/mtdpart.c').read_bytes() != (experiment / 'mtdpart.c').read_bytes():
+                raise ValueError('reconstructed partition differs from exported candidate')
 
     template = (fixtures / 'fixture.c.in').read_text()
     sources = [
@@ -133,7 +142,7 @@ def main():
         out = Path(temp)
         for label, driver_source, core_source, historical in sources:
             src = out / (label + '.c')
-            src.write_text(fixture(template, driver_source, core_source, historical))
+            src.write_text(fixture(template, driver_source, core_source, historical, (experiment / 'mtdpart.c').read_text()))
             controls = [(0, []), (1, [])]
             if not historical:
                 controls += [(0, ['-DCONTRACT_REJECTION', '-DCORE_BUILTIN=0']),
@@ -144,7 +153,7 @@ def main():
                 options = ['-DHISTORICAL_CONTROL'] if historical else []
                 subprocess.run([args.cc, *flags, *options, *control,
                                 '-DPARTITIONED_MASTER=' + str(partitioned),
-                                str(src), '-o', str(exe)], check=True)
+                                str(src), '-o', str(exe)], check=True, timeout=60)
                 subprocess.run([str(exe)], check=True, timeout=20, env=env)
     return 0
 
