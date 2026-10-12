@@ -14,9 +14,15 @@ fixes, experimental build profiles and firmware evidence. Nothing here is
 evidence of a successful physical charging, external USB-host or writable NAND
 test. The normal boot procedure remains [QUICKSTART](../QUICKSTART.md).
 
+The [deeper solution paths](p105-deeper-solutions.md) describe the newly
+implemented, isolated Linux-C components for current control, PPN program/erase
+and external USB-client/role handling. The normal build does not enable them.
+[Actual offline UBIFS images](p105-linux-owned-rootfs.md) complete the file-build
+layer without formatting or attaching a device.
+
 | Area | Implemented and tested offline | Still unresolved |
 | --- | --- | --- |
-| Battery/PMU | Atomic HDQ cache, valid percentage range, break failure handling, discharge status, GPIO errors, removal of event-consuming probe dump | Complete charger initialization, battery/fault protection, voltage/termination policy and hardware verification |
+| Battery/PMU | Coherent high–low–high HDQ words, atomic cache, valid percentage range, break failure handling, discharge status, GPIO errors, removal of event-consuming probe dump; isolated current/IRQ controller | Real source/gauge producer, analog retention, complete charger initialization, battery/fault protection, voltage/termination policy and hardware verification |
 | NAND | Read progress/ECC errors, PIO completion/tail-copy errors, failed-payload publication gates, explicit read-only MEMREAD backend with exact sysfs/device identity, strict metadata/cache checks, reduced mapper memory, NBD bounds/setup/worker cleanup, pidfd control and generation-bound System readiness | Actual process/sysfs hardware integration, target capacity/performance, writable PPN/FTL and Linux-owned storage |
 | USB | Host-only build/link, bounded ADT parser, PHY power-error handling, two-bit GPIO selector masks, explicit input/IRQ peripheral-mode exit, isolated HID/storage profile | Hardware verification of the new reference-recovery path, complete connector routing, external 5 V VBUS/protection, role transitions and real peripherals |
 
