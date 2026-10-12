@@ -86,3 +86,8 @@ exclusivity, bad-block journal persistence or a safe UBI/UBIFS write callback.
 Those conditions still block writable MTD binding. No device was tested.
 
 Portable reproduction: `python3 tests/test-experimental-ppn-cdma.py`. The semantic fixture contains synthetic addresses/program words and no firmware instructions. ARMv7 object compilation against actual patched Linux6.12 headers passed with zero warnings.
+
+The independently qualified [native binding](../../docs/research/p105-ppn-cdma-binding.md)
+now establishes resource windows, channels5..8/IRQ55..58 and both version-specific
+IOP completion layouts. It does not supply AP DMA mapping, IOP handoff or hardware
+backend permission. Do not reuse the12H internal state ABI on13G.

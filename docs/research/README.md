@@ -100,3 +100,9 @@ in the source repository.
 
 * [Staging loader stack reservation](p105-staging-stack.md) — ARM prologue
   negative control and linker overlap rejection; offline only.
+
+* [Owned USB-to-charger invalidation](../../experiments/p105-source/NOTIFICATIONS.md)
+  — atomic epoch/work callbacks with RCU-drained ownership; physical timing unproven.
+
+* [Native CDMA resource/IRQ/translation binding](p105-ppn-cdma-binding.md) —
+  independently verified12H/13G evidence; physical ownership/durability separate.
