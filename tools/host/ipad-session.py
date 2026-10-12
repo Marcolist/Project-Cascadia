@@ -141,15 +141,30 @@ def main(argv=None):
             command += ["sh -s"]
         if args.out:
             output_fd = os.open(args.out, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        result = subprocess.run(command, input=data, capture_output=True, timeout=45)
+        timed_out = False
+        try:
+            result = subprocess.run(command, input=data, capture_output=True, timeout=45)
+        except subprocess.TimeoutExpired as error:
+            # run() kills and reaps the child before raising. Retain the bytes
+            # it captured: a stalled kernel/connection often leaves the most
+            # useful diagnostics immediately before the timeout.
+            timed_out = True
+            result = subprocess.CompletedProcess(command, 1, error.output or b"",
+                                                 error.stderr or b"")
         if output_fd is not None:
             with os.fdopen(output_fd, "wb") as output:
                 output_fd = None
                 output.write(result.stdout)
                 output.write(result.stderr)
         else:
-            sys.stdout.buffer.write(result.stdout)
-            sys.stderr.buffer.write(result.stderr)
+            if result.stdout:
+                sys.stdout.buffer.write(result.stdout)
+            if result.stderr:
+                sys.stderr.buffer.write(result.stderr)
+        if timed_out:
+            print("ipad-session: SSH timed out after 45 seconds; partial output retained; "
+                  "remote completion is unconfirmed; no automatic retry", file=sys.stderr)
+            return 1
         if result.returncode:
             return result.returncode
         if args.action == "deploy":

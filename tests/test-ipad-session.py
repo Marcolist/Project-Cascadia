@@ -7,6 +7,7 @@ import io
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -106,6 +107,31 @@ class Tests(unittest.TestCase):
         rc, run = self.call("--device-access", "deploy", "--allow-ram-deploy", "--file", str(self.dir / "fifo"))
         self.assertEqual(rc, 1)
         run.assert_not_called()
+
+    def test_real_child_timeout_retains_diagnostics_and_never_accepts_upload(self):
+        real_run = subprocess.run
+        child = ("import os,time; os.write(1,b'partial kernel output\\n'); "
+                 "os.write(2,b'partial SSH error\\n'); time.sleep(10)")
+        src = self.dir / "payload"
+        src.write_bytes(b"offline payload")
+        for action in ("logs", "deploy"):
+            out = self.dir / (action + ".timeout.log")
+            argv = self.argv + ["--device-access", action, "--out", str(out)]
+            if action == "deploy":
+                argv += ["--allow-ram-deploy", "--file", str(src)]
+            def run_offline_child(command, **kwargs):
+                # Real subprocess kill/reap/captured TimeoutExpired bytes;
+                # substitute a local child before any SSH process can start.
+                kwargs["timeout"] = 0.5
+                return real_run([sys.executable, "-c", child], **kwargs)
+            with patch.object(session.subprocess, "run", side_effect=run_offline_child) as run:
+                with contextlib.redirect_stderr(io.StringIO()) as errors:
+                    rc = session.main(argv)
+            self.assertEqual(rc, 1)
+            self.assertEqual(out.read_bytes(), b"partial kernel output\npartial SSH error\n")
+            self.assertEqual(out.stat().st_mode & 0o777, 0o600)
+            self.assertIn("remote completion is unconfirmed", errors.getvalue())
+            self.assertEqual(run.call_count, 1)
 
     def test_deploy_checks_exact_hash_and_new_ram_path(self):
         src = self.dir / "artifact"

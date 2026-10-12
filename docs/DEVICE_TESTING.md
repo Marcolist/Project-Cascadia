@@ -45,6 +45,9 @@ visible as missing data or command errors; this best-effort collector produces
 no overall hardware PASS. Preserve SSH failures/timeouts and avoid blind retry.
 A new log is created mode600 with O_EXCL; existing paths are never overwritten.
 Logs may contain addresses and device identifiers; keep them private.
+On the 45-second SSH timeout, captured partial stdout/stderr is saved to the
+new log (or emitted to the terminal) before failure is reported. A timeout
+never confirms remote completion or an upload receipt and triggers no retry.
 
 MTD size/geometry here is what the driver reports, currently from its hardcoded
 configuration, not a measured identification of this physical unit. No MTD
