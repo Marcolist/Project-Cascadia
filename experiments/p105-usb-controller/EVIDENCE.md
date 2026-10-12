@@ -1,6 +1,6 @@
 # Denied-by-default P105 controller register primitives
 
-Private source-only prototype; no shared branch edits, runtime registration,
+Source-only proposal; no runtime registration,
 DT overlay, role match, host publication or device access. Kconfig defaults n.
 
 ## Narrow implemented backend

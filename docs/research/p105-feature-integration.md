@@ -224,3 +224,5 @@ RSA public exponentiation, with independent public signature checks. This closes
 specific key/math gaps; it supplies no path construction, anchor legitimacy,
 complete iAP trust, adapter-specific authorization or protected VBUS. Current
 power and USB-role consumers still receive no physical permission from it.
+
+For focused code review, use the [normal/optional correction map](p105-review-map.md). It links concrete triggers, changed components and actual-source regression runners without proposing feature activation.
