@@ -90,3 +90,23 @@ Offline tests replace SSH with process-local fakes and cover the connection
 gate, key options, unsafe addresses, permissions, no-overwrite, timeout/failure
 retention, file bounds and upload receipt/hash/path checks. They exercise no
 device connection. Remote scripts also pass shell syntax checking.
+
+
+## Selecting a frozen package for a later authorized boot
+
+The current tools/flash.sh takes bundle and loader from its own ROOT/output.
+The --ibec option selects only iBEC; it does not select either output image.
+Before a separately authorized upload, compare the actual files it will read
+with the selected package's hashes. A research HEAD or a matching iBEC alone
+does not establish the chosen kernel/rootfs/SSH identity.
+
+For an isolated frozen-package session, prepare a private runner tree containing
+an unchanged, reviewed copy of tools/flash.sh and the exact selected bundle and
+loader at output/staging-bundle.bin and output/staging-loader.bin. Keep the
+selected plain iBEC explicit. Pin/check script and all three artifact hashes;
+preserve normal output. Record the future --kdfu --no-link --no-uart invocation
+as data only. Resolve the reviewed guarded Legacy-Kit/irecovery paths and live
+prerequisites in the human session; do not execute or accept the default kit
+path automatically. Preparing the tree authorizes no jailbreak, exploit,
+transfer, host address change or boot. These options preserve the documented
+upload chain; there is no extra go or restore command.
