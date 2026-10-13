@@ -745,12 +745,12 @@ Build products (`output/`) and stock firmware are not tracked; everything in
 - **Phase 4** — A6X (iPad 4)
 - **Phase 5 (And so on)** — Any other Apple chip for which no usable Linux port has appeared.
 
-The next in line after the iPad mini 1/iPad 4 will likely be (in no particular order):
-iPad Air 2 — A9X
-iPad mini 4 — A8
-iPad mini 5 — A12 (requires additional hardware for booting, just like the A5)
-iPad 9 — A13 (requires additional hardware for booting)
-iPad 5 — A9
+The next in line with no particular order after the iPad mini 1/iPad 4 will likely be (Phase 5 and so on):
+- iPad Air 2 — A9X
+- iPad mini 4 — A8
+- iPad mini 5 — A12 (requires additional hardware for booting, just like the A5)
+- iPad 9 — A13 (requires additional hardware for booting)
+- iPad 5 — A9
 
 ![FastFetch written using screen keyboard](imgs/IMG_1196.jpg)
 
