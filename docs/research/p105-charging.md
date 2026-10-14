@@ -9,6 +9,12 @@ control paths and a reproducible offline emulator, rather than only a list of
 missing Linux subsystems. Hardware semantics, charger policy and protection
 must still be validated before installing a charger driver that writes registers.
 
+The [14 October early-P105 follow-up](#early-p105-initialization-follow-up--14-october-2026)
+independently examines iOS 6.0. It distinguishes actual initialization writes,
+temperature measurement trim and voltage-to-capacity profiles from the still
+unqualified analog charging setup. The original sections below retain their
+explicit 12H321 source scope.
+
 ## Existing support and useful fixes
 
 The existing `apple-hdq-battery.c` is a fuel-gauge driver, not a charger driver.
@@ -496,3 +502,67 @@ improvement is claimed. The useful completed results are the stronger gauge
 driver, tested observation tools, exact firmware provenance and an offline
 charging-control and thermal/voltage-policy experiments that can guide the
 next porting step.
+
+## Early P105 initialization follow-up — 14 October 2026
+
+This separately mapped source is the original iPad2,5 iOS **6.0 / 10A406**
+kernel component from the [official Apple restore archive](https://secure-appldnld.apple.com/iOS6/041-5525.20121101.Rstre/iPad2,5_6.0_10A406_Restore.ipsw).
+Only the kernel member was fetched with checked HTTP ranges, ZIP CRC and
+compressed-image bounds; the whole archive was not downloaded or hashed.
+Community decryption-key provenance is the [exact P105 key page](https://theapplewiki.com/index.php?title=Keys:Sundance_10A406_(iPad2,5)&oldid=154515),
+distinct from the official payload's provenance. AES/complzss length, Adler32
+and Mach-O bounds were checked; the Apple Img3 signature was not independently
+verified. Decrypted kernel SHA256:
+`9b4acd2d171f8e39b1e047daf067ccfbdd7ce1b2382ddeb82247543e1adbd100`.
+
+AppleD1946PMU1.0.1 is loaded at `0x80c8b000`, file offset `0xc4a000`,
+size `0x15000`. It contains its own PMUPowerSource and does not declare the
+later AppleDialogPMU dependency. All following addresses refer only to this
+image; neither later addresses nor later ADT values are substituted.
+
+**Startup writes are real, but do not prove complete charger setup.**
+PMU start `0x80c8bc4c..0x80c8c1d8` initializes event masks and LDO suspend
+defaults, and contains read/OR/write sequences for `0x9f` and `0x1c`.
+Five original-instruction controls over `0x80c8bf96..0x80c8bfe4`, with fake
+transport and seeded scratch RAM, cover success and each of the four transfer
+failure positions. Each failure still permits all four operations; the next
+instruction overwrites the status. This proves local failure continuation,
+not the whole function's eventual success or a real fault on the iPad.
+Transitive initialization callees are not globally proved free of analog
+effects. These writes are not proposed for Linux replay.
+
+**Two newly identified initializer reads are measurement trim.** Reads of
+`0x55/0x56` produce a 12-bit owner field at `+0x94`; its actual consumer is
+the ADC-channel8 branch at `0x80c8e0c6`. The independently resolved sensor-name
+table identifies channel8 as `tjunc`. The software conversion accepts trim
+1000..1100, otherwise uses1048, and yields Q16 temperature from
+`(2600 - 33*(raw-trim))/100` with integer truncation. Thirty-five original
+pure-arithmetic cases pass in fake RAM. This identifies junction-temperature
+measurement, not a CV setting, autonomous thermal cutoff or physical
+calibration.
+
+**The battery profile estimates capacity.** The startup reads design capacity
+and chooses a `battery-data` OSData profile using family/battery-ID, with a
+`%04x-default` fallback. The selected byte pointer is stored at owner `+0x150`.
+The consumer `0x80c94450..0x80c948a0` interpolates voltage-indexed Q16
+percentage, scales by design capacity, stores a software history and can publish
+`BootCapacityEstimate`. Nine original interpolation/helper executions across
+the three authentic profiles pass with synthetic voltages, design capacity
+and zero compensation. No PMU, ADC or property helper executes in that replay.
+One profile has37 local voltage reversals; its original sequential search is
+preserved. Neither voltage values in these profiles nor trailing unclassified
+OSData are physical charging-voltage or protection thresholds. The selected
+profile on the current live battery has not been established.
+
+The source-start block `0x80c90b50..0x80c90bde` still reads inherited current
+limits from `0x3f` and the five slot registers. Current-plan, low-input and EOC
+paths independently match the later current-control scope. No CV target,
+termination-current threshold or checked complete analog handoff has been
+identified in these bounded paths. The five startup, 35 junction and nine
+profile controls are private original-input source checks, separate from
+ordinary public regression suites and all live hardware qualification.
+
+No firmware bytes, profile tables, credentials or private test artifacts are
+published. No new boot, PMU write or charger enable was performed for this
+source follow-up. The running gauge/session and the inactive charger
+experiments remain unchanged.
