@@ -20,6 +20,7 @@
 #include <linux/gpio/driver.h>
 #include <linux/apple-pmu-i2c.h>
 #include <linux/module.h>
+#include <linux/platform_device.h>
 #include "apple-pmu-d1946-bank0.h"
 
 #if IS_ENABLED(CONFIG_APPLE_PMU_D1946_BANK0_EXPERIMENT)
@@ -403,6 +404,67 @@ static struct i2c_driver apple_pmu_i2c_driver = {
     },
     .probe = apple_pmu_i2c_probe,
 };
+
+
+#if IS_ENABLED(CONFIG_APPLE_PMU_D1946_BANK0_EXPERIMENT)
+/* Probe-time direct child only. The managed link keeps parent devres alive until
+ * child probe unwind/remove drains its users. No parent lock: children may first
+ * probe inside OF population while the parent is still probing; defer instead.
+ * This observes real transport identity/health, not analog charger permission. */
+struct regmap *apple_pmu_d1946_bank0_get_for_child(struct device *child)
+{
+    struct device *parent;
+    struct i2c_client *client;
+    struct device_link *link;
+    const struct of_device_id *match;
+    struct apple_pmu_i2c *pmu;
+    enum device_link_state status;
+    int ret;
+
+    if (IS_ERR_OR_NULL(child) || !dev_is_platform(child) ||
+        READ_ONCE(child->links.status) != DL_DEV_PROBING)
+        return ERR_PTR(-EINVAL);
+    parent = child->parent;
+    if (IS_ERR_OR_NULL(parent) || parent == child)
+        return ERR_PTR(-EINVAL);
+    client = i2c_verify_client(parent);
+    if (!client)
+        return ERR_PTR(-ENODEV);
+    if (READ_ONCE(parent->driver) != &apple_pmu_i2c_driver.driver)
+        return ERR_PTR(READ_ONCE(parent->driver) ? -ENODEV : -EPROBE_DEFER);
+    if (READ_ONCE(parent->links.status) != DL_DEV_DRIVER_BOUND)
+        return ERR_PTR(-EPROBE_DEFER);
+    match = of_match_device(apple_pmu_i2c_of_match, parent);
+    if (!match || match->data != &apple_pmu_i2c_d1946_info ||
+        !of_machine_is_compatible("apple,p105ap"))
+        return ERR_PTR(-EOPNOTSUPP);
+
+    link = device_link_add(child, parent, DL_FLAG_AUTOREMOVE_CONSUMER);
+    if (!link)
+        return ERR_PTR(-EPROBE_DEFER);
+    status = READ_ONCE(link->status);
+    if ((status != DL_STATE_CONSUMER_PROBE && status != DL_STATE_ACTIVE) ||
+        READ_ONCE(parent->links.status) != DL_DEV_DRIVER_BOUND ||
+        READ_ONCE(parent->driver) != &apple_pmu_i2c_driver.driver)
+        return ERR_PTR(-EPROBE_DEFER);
+    /* Only a correctly bound, lifetime-guarded parent may expose its drvdata. */
+    pmu = dev_get_drvdata(parent);
+    if (IS_ERR_OR_NULL(pmu) || pmu->dev != parent ||
+        IS_ERR_OR_NULL(pmu->regmap))
+        return ERR_PTR(-ENODEV);
+    if (!pmu->bank0)
+        return ERR_PTR(-EOPNOTSUPP);
+    ret = d1946_bank0_check_running(pmu->bank0, client);
+    if (ret)
+        return ERR_PTR(ret);
+    if (dev_get_regmap(parent, NULL) != pmu->regmap)
+        return ERR_PTR(-ENODEV);
+    /* State can change after this snapshot; every regmap callback rechecks its
+     * own admission under the existing map/adapter locks before data access. */
+    return pmu->regmap;
+}
+EXPORT_SYMBOL_GPL(apple_pmu_d1946_bank0_get_for_child);
+#endif
 
 static int __init apple_pmu_i2c_init(void)
 {

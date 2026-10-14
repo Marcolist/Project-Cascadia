@@ -723,9 +723,19 @@ static void d_prepare_desc(struct d1946_current *d)
 		.external_power_changed = NULL
 	};
 }
+
+static struct regmap *d_parent_map(struct device *child)
+{
+#if IS_ENABLED(CONFIG_APPLE_PMU_D1946_BANK0_EXPERIMENT)
+	return apple_pmu_d1946_bank0_get_for_child(child);
+#else
+	(void)child;
+	return ERR_PTR(-EOPNOTSUPP);
+#endif
+}
 static int d_probe(struct platform_device *pdev)
 {
-	struct apple_pmu_i2c *pmu;
+	struct regmap *map;
 	struct d1946_current *d;
 	struct power_supply_config cfg = {};
 	unsigned int i;
@@ -738,14 +748,14 @@ static int d_probe(struct platform_device *pdev)
 	    !of_property_read_bool(pdev->dev.of_node,
 				   "apple,no-input-calibration"))
 		return -EPERM;
-	pmu = dev_get_drvdata(pdev->dev.parent);
-	if (!pmu || !pmu->regmap)
-		return -EPROBE_DEFER;
+	map = d_parent_map(&pdev->dev);
+	if (IS_ERR(map))
+		return PTR_ERR(map);
 	d = devm_kzalloc(&pdev->dev, sizeof(*d), GFP_KERNEL);
 	if (!d)
 		return -ENOMEM;
 	d->dev = &pdev->dev;
-	d->map = pmu->regmap;
+	d->map = map;
 	d->parent_irq = -1;
 	mutex_init(&d->bus_lock);
 	mutex_init(&d->io_lock);

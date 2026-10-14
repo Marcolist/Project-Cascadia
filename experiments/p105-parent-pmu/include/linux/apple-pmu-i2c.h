@@ -19,4 +19,9 @@ struct apple_pmu_i2c {
     struct d1946_bank0_bus *bank0; /* Optional experimental parent transport. */
 };
 
+#if IS_ENABLED(CONFIG_APPLE_PMU_D1946_BANK0_EXPERIMENT)
+/* Probe-time direct-child API. Managed supplier link; no I/O or safety grant. */
+struct regmap *apple_pmu_d1946_bank0_get_for_child(struct device *child);
+#endif
+
 #endif

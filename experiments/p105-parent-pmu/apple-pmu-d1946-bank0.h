@@ -14,6 +14,8 @@ struct d1946_bank0_bus {
 	atomic_t off_ready;
 	int first_error; /* Adapter lock protects diagnostic writes. */
 };
+int d1946_bank0_check_running(struct d1946_bank0_bus *b,
+                            struct i2c_client *client);
 int d1946_bank0_init(struct d1946_bank0_bus *b, struct i2c_client *client);
 void d1946_bank0_config(struct d1946_bank0_bus *b, struct regmap_config *config);
 const struct regmap_bus *d1946_bank0_regmap_bus(void);

@@ -9,5 +9,21 @@
     "patches/files/drivers/video/backlight/apple-pmu-wled.c": "797d77c882d36c832085dc8e11d710da53190ea715c725095ea8c055935f6801",
     "patches/files-sandcastle-port/drivers/regulator/apple-pmu-pwrsw.c": "2acffd17c5703b553f1cf3353c3f9a306f63a20c15ceefaa2dc64b3c0eb9b504",
     "dts/p105ap.dts": "cc0f97f49f64b8424278c638d63f503da4424a2b5da7a605251b577062263276"
+  },
+  "parent_current_binding": {
+    "scope": "source-only, no normal activation; managed direct-child accessor and transport admission snapshot",
+    "files": {
+      "experiments/p105-parent-pmu/apple-pmu-i2c.c": "520ca9684e94fc4ed63d861176400ecf2e6b58fe96b7498a339c8638ff9cb023",
+      "experiments/p105-parent-pmu/apple-pmu-d1946-bank0.c": "f13d6c69fe923fa091714fd399f6dde29a8411723d6391795acffa77f125ccf2",
+      "experiments/p105-parent-pmu/apple-pmu-d1946-bank0.h": "ee3400994f0c8471b6e2dd1c6b7f35631737a400ffe9348d875f1bb5e0579eae",
+      "experiments/p105-current/apple-d1946-current-only.c": "128a033fc06f20c4c235650e445726fb83f17d2fedeb7d01993e1c88678d0a61",
+      "experiments/p105-parent-pmu/parent-regmap.patch": "29ebe0abf17b63a22858fbb8569981cbdd82fd0ebda441e6480ffd22449fea7f",
+      "experiments/p105-parent-pmu/include/linux/apple-pmu-i2c.h": "920cede5e24f78111e6f26f7a01b7e6b8296ee1bbcc0566d2749b05a70e83b4f",
+      "experiments/p105-current/historical-d-probe-unbanked.c": "276419df5efe6ee73d3abeb7400405672cb4be72825b2404555bd035d7376cec",
+      "tests/test-experimental-parent-current-binding.py": "240c9738311a1a2ef760d0c54978dcfe588a03248b019a9eb44ab9fef6468a08"
+    },
+    "runtime_transport_guarantee": "checked implementation identity/running-state snapshot only; does not enforce global adapter/retry immutability or analog protection",
+    "test_entrypoint": "tests/test-experimental-parent-current-binding.py",
+    "historical_full_probe_sha256": "276419df5efe6ee73d3abeb7400405672cb4be72825b2404555bd035d7376cec"
   }
 }

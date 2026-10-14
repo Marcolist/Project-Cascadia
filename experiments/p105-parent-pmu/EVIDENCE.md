@@ -54,3 +54,29 @@ make -C /linux M=/stage ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- W=1 apple-pm
 All three objects PASS0warnings (`arm-enabled.log`, `arm-default-off.log`). Relocatable linking resolves every transport helper in the enabled parent. `nm -u` on the default-off parent contains no transport helper references. The standalone private header is forced before the old private-kernel header solely to represent the matching patched parent struct; normal headers/tree are untouched. These are object/link checks, not a runnable module, boot or hardware validation.
 
 Review application, **isolated source only**: copy helperC/H to matching drivers/mfd, apply `parent-regmap.patch` to the Cascadia overlay MFD/header, append Kconfig/Makefile fragments in that isolated Linux source. The full candidate MFD and header are supplied for exact review/apply comparison. None of these steps is automatically run by a normal Cascadia build. Analogue CV/termination/protection, ADC cancellation/ownership, physical charging and poweroff behavior remain unvalidated.
+
+## Current-controller attachment — 14 October 2026
+
+The current frontend now requires an exported, probe-only accessor from this
+actual parent implementation. Driver/bus/D1946/P105 identity checks precede any
+parent `drvdata` interpretation. A managed `DL_FLAG_AUTOREMOVE_CONSUMER` link
+protects the borrowed regmap through child teardown; it is not manually released
+on probe failure, and the child must never free the parent's regmap. A probing
+parent defers; no parent mutex is taken from the child probe. The accessor checks
+matching bank-zero client identity, running/no-fault state and registered regmap
+without any I2C operation. These checks are a snapshot; callback admission and
+worker teardown remain required.
+
+Actual Linux 6.12 `drivers/base/core.c` and `drivers/base/dd.c` were reviewed:
+consumer-probe/active links hold off supplier teardown, including a link added
+while unbind has started. The post-link driver/state checks reject that late
+unbind path before the cast. Normal poweroff runs `device_shutdown()` before
+power-off-prepare handlers, so the frontend's existing shutdown drain precedes
+the parent's seal operation. This ordering is not proof of physical cutoff.
+
+The targeted [current binding fixture](../../tests/test-experimental-parent-current-binding.py)
+passes five positive groups and an expected historical negative control under
+ASan/UBSan. It uses driver-core fakes and only the real probe prefix before the
+first allocation; actual full-kernel lifetime behavior is source-reviewed, not
+hardware-tested. The adapter-retry ioctl, analog and event-ownership boundaries
+above are unchanged. No normal build enables this interface.

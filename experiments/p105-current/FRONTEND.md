@@ -246,3 +246,50 @@ This qualification uses an empty initramfs source and adds no P105 device tree,
 probe binding or boot bundle. It does not change the normal build or demonstrate
 physical charging. Analog regulation/termination/protection and PMU ownership
 remain prerequisites for runtime activation.
+
+## Bind the actual shared PMU transport — 14 October 2026
+
+The previous probe cast arbitrary parent driver data to `apple_pmu_i2c` and
+accepted its regmap. The current controller therefore did not establish that it
+used the already prepared shared bank-zero transport. Both source routes now
+obtain their map through `apple_pmu_d1946_bank0_get_for_child()` before allocation,
+provider acquisition or the first PMU read. Without the experimental parent
+configuration this gate returns `-EOPNOTSUPP`.
+
+The accessor checks an actual platform child in probe, its I2C parent, the bound
+PMU driver identity, D1946 match and P105 machine, then creates a managed supplier
+link. It rechecks binding before interpreting parent driver data, verifies the
+parent's registered regmap and matching bank-zero client, and rejects stopped,
+sealed or faulted transport. These are memory/driver-core checks with no register
+access. The link makes supplier unbind wait for child probe/remove; existing
+worker/IRQ teardown still has to drain all users. A parent still probing defers
+without taking the parent lock. Later state changes remain subject to the actual
+regmap callback admission checks; the getter is not a lasting authorization.
+
+`tests/test-experimental-parent-current-binding.py` executes the actual getter,
+transport check, callback admission and both actual probe prefixes through the
+last gate before allocation. Five positive groups cover identity, lifetime,
+transport health, both routes and the disabled configuration. A SHA-pinned
+historical probe prefix fails the new unbanked-map rejection contract with the
+expected exit 23. Driver-core, OF and regmap lookup are explicit fakes; this does
+not run a complete probe or test physical I2C. GCC ASan/UBSan and
+`-Wall -Wextra -Werror` pass in a network-isolated 1 CPU / 512 MiB container.
+
+The normal overlay/header, configuration and device tree remain unchanged.
+This closes the specific unchecked parent attachment. It does not establish
+exclusive PMU-event ownership, analog regulation/termination/protection,
+retained configuration or adapter retry immutability. In particular the existing
+`I2C_RETRIES` ioctl limitation in the [parent transport evidence](../p105-parent-pmu/EVIDENCE.md)
+still applies. No charge-enable setting or hardware activation is added.
+
+A subsequent private ARM Linux 6.12 candidate links this parent implementation
+into `vmlinux` and both required charging modules in one MODPOST/final-link step.
+The actual getter is exported by the kernel and referenced by the current
+module. This incremental whole-kernel/module build completes with zero warnings;
+the preceding candidate's unrelated full-rebuild warnings are unchanged history.
+The ten existing parent transport regressions also pass. Compiled BSS verifies
+`p105_bank0`, all four current bools and CDC demand default to zero. The private
+kernel retains `I2C_CHARDEV=y`, so the documented retry-immutability limitation
+is explicitly unresolved. The empty-source 512-byte initramfs contains only
+`dev`, `dev/console` and `root`; this is not a usable boot package and was not
+transferred or booted.

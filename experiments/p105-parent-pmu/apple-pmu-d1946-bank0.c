@@ -31,6 +31,23 @@ int d1946_bank0_init(struct d1946_bank0_bus *b, struct i2c_client *client)
 	return 0;
 }
 
+
+/* No I/O and no lasting lease: caller has already established parent lifetime.
+ * The regmap callbacks still enforce admission after later revoke/seal/stop. */
+int d1946_bank0_check_running(struct d1946_bank0_bus *b,
+                            struct i2c_client *client)
+{
+	if (IS_ERR_OR_NULL(b) || IS_ERR_OR_NULL(client))
+		return -EINVAL;
+	if (b->client != client)
+		return -ENODEV;
+	if (atomic_read(&b->state) != BANK0_RUNNING)
+		return -ESHUTDOWN;
+	if (atomic_read(&b->fault))
+		return -EIO;
+	return 0;
+}
+
 static int bank0_failed(struct d1946_bank0_bus *b, int ret)
 {
 	if (ret >= 0)
