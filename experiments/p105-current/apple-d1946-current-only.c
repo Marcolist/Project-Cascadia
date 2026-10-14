@@ -314,6 +314,13 @@ static void d_worker(struct work_struct *work)
 	if (!READ_ONCE(d->ready) || !READ_ONCE(d->events_enabled) ||
 	    READ_ONCE(d->stopping))
 		return;
+	/* A known PMU/IRQ fault needs only the bounded inhibit path. Do not
+	 * delay it with an unrelated fresh supplier/gauge capture. Faults that
+	 * arrive after this check remain handled by the later locked check. */
+	mutex_lock(&d->io_lock);
+	if (d->fault_latched)
+		goto fault;
+	mutex_unlock(&d->io_lock);
 	/* Supplier must implement actual UDC/accessory permission; no source guessing. */
 	ret = d->provider->snapshot(d->provider->context, d->input, d->battery,
 				    &snapshot);

@@ -1,6 +1,7 @@
 from pathlib import Path
-import re,resource,shutil,subprocess,tempfile,unittest
+import re,resource,shutil,subprocess,tempfile,unittest,hashlib
 ROOT=Path(__file__).resolve().parents[1]/'experiments/p105-current'
+SOURCE=ROOT/'apple-d1946-current-only.c'
 
 def function(s,n):
  pos=re.search(r'\b'+re.escape(n)+r'\(',s).start();a=s.rfind('\n',0,pos)+1;b=s.index('{',pos);depth=1;e=b+1
@@ -11,7 +12,7 @@ class Worker(unittest.TestCase):
  @classmethod
  def setUpClass(cls):
   if not shutil.which('gcc'):raise unittest.SkipTest('gcc required')
-  src=(ROOT/'apple-d1946-current-only.c').read_text()
+  src=SOURCE.read_text()
   c=r'''
 #define main core_original_main
 #include "core-fixture.c"
@@ -85,23 +86,66 @@ static void worker_test(void){
   assert(d.fault_latched&&d.inhibit_attempted&&!d.applied_valid&&d.epoch==1&&snapshots==1&&schedules==1&&pending==1&&f.calls>0);
   unsigned int calls=f.calls,writes=f.writes;pending=0;
   d_worker(&d.work.work);
-  /* No firmware/source grant exists: both attempts received the actual error. */
+  /* First supplier error latches fault; second run must bypass supplier. */
+  #ifdef HISTORICAL_BUSY_WORKER
   assert(snapshots==2&&d.epoch==2&&d.fault_latched&&f.calls==calls&&f.writes==writes);
+#else
+  assert(snapshots==1&&d.epoch==1&&d.fault_latched&&f.calls==calls&&f.writes==writes);
+#endif
   assert(schedules==1&&pending==0);
  }
  puts("actual worker two failure iterations/bounded inhibit/no busyloop fixtures PASS");
 }
-int main(int argc,char **argv){assert(argc==2);if(!strcmp(argv[1],"fault"))fault_test();else worker_test();}
+
+static void prelatched_test(void){
+ struct d1946_current d;struct fake f;init(&d,&f);
+ mutex_lock(&d.io_lock);d_fault(&d);mutex_unlock(&d.io_lock);
+ pending=0;d_worker(&d.work.work);
+ assert(snapshots==0&&d.epoch==1); /* Explicit old worker counterexample. */
+ assert(d.inhibit_attempted&&!d.applied_valid&&d.fault_latched);
+ assert(f.regs[0x3f]&0x40);assert(f.regs[0x1b]&4);assert(f.regs[0x1c]&0x80);assert(f.regs[0x3d]==0);
+ assert(f.writes>0&&pending==0&&schedules==1&&!d.io_lock.locked);
+ unsigned int calls=f.calls;d_worker(&d.work.work);
+ assert(snapshots==0&&f.calls==calls&&d.epoch==1&&!pending);
+ puts("prelatched skip/inhibit/zero-input fixtures PASS");
+}
+static void inactive_test(void){
+ struct d1946_current d;struct fake f;
+ for(unsigned int i=0;i<3;i++){
+  init(&d,&f);d.fault_latched=true;
+  if(i==0)d.ready=false;else if(i==1)d.events_enabled=false;else d.stopping=true;
+  d_worker(&d.work.work);assert(!snapshots&&!f.calls&&!schedules&&!d.inhibit_attempted);
+ }puts("inactive admission fixtures PASS");
+}
+int main(int argc,char **argv){assert(argc==2);if(!strcmp(argv[1],"fault"))fault_test();else if(!strcmp(argv[1],"prelatched"))prelatched_test();else if(!strcmp(argv[1],"inactive"))inactive_test();else worker_test();}
+
 '''
   cls.tmp=tempfile.TemporaryDirectory();p=Path(cls.tmp.name);(p/'test.c').write_text(c);cls.bin=p/'test';cls.old=p/'historical-test'
   old=(ROOT/'historical-d-fault.c').read_text()
-  (p/'historical.c').write_text(c.replace(function(src,'d_fault'),function(old,'d_fault')))
-  for source,target in [('test.c',cls.bin),('historical.c',cls.old)]:
-   subprocess.run(['gcc','-DCASCADIA_OFFLINE','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-function','-fsanitize=address,undefined','-fno-sanitize-recover=all','-I',str(ROOT),str(p/source),str(ROOT/'d1946-current-core.c'),'-o',str(target)],check=True)
+  worker=(ROOT/'historical-d-worker-prelatched.c').read_text()
+  expected='1d8984f18bd60e886353a3daa78a5e9360cbb395d0ad40dd994011478ffb853a'
+  assert hashlib.sha256(worker.encode()).hexdigest()==expected
+  # Preserve the former self-requeue defect by combining BOTH actual old
+  # functions; the new early skip must not hide its invocation in this control.
+  busy=c.replace(function(src,'d_worker'),function(worker,'d_worker'))
+  busy=busy.replace(function(src,'d_fault'),function(old,'d_fault'))
+  (p/'historical.c').write_text('#define HISTORICAL_BUSY_WORKER 1\n'+busy)
+  (p/'historical-prelatched.c').write_text(c.replace(function(src,'d_worker'),function(worker,'d_worker')))
+  cls.oldskip=p/'historical-prelatched'
+  for source,target in [('test.c',cls.bin),('historical.c',cls.old),('historical-prelatched.c',cls.oldskip)]:
+   subprocess.run(['gcc','-DCASCADIA_OFFLINE','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-function','-fsanitize=address,undefined','-fno-sanitize-recover=all','-fno-pie','-no-pie','-I',str(ROOT),str(p/source),str(ROOT/'d1946-current-core.c'),'-o',str(target)],check=True)
+
  @classmethod
  def tearDownClass(cls):cls.tmp.cleanup()
  def test_actual_first_fault_queue_and_epoch(self):self.assertIn('fixtures PASS',subprocess.check_output([str(self.bin),'fault'],text=True))
  def test_actual_two_worker_failure_iterations(self):self.assertIn('fixtures PASS',subprocess.check_output([str(self.bin),'worker'],text=True))
+ def test_actual_prelatched_inhibit_without_supplier(self):self.assertIn('fixtures PASS',subprocess.check_output([str(self.bin),'prelatched'],text=True))
+ def test_actual_inactive_admission(self):self.assertIn('fixtures PASS',subprocess.check_output([str(self.bin),'inactive'],text=True))
+ def test_historical_prelatched_capture_is_rejected(self):
+  def no_core():resource.setrlimit(resource.RLIMIT_CORE,(0,0))
+  result=subprocess.run([str(self.oldskip),'prelatched'],text=True,capture_output=True,preexec_fn=no_core)
+  self.assertNotEqual(result.returncode,0)
+  self.assertIn('snapshots==0&&d.epoch==1',result.stderr)
  def test_historical_worker_selfrequeue_is_rejected(self):
   def no_core():resource.setrlimit(resource.RLIMIT_CORE,(0,0))
   result=subprocess.run([str(self.old),'worker'],text=True,capture_output=True,preexec_fn=no_core)

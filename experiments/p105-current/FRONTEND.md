@@ -367,3 +367,32 @@ The previously linked kernel, provider module, configuration and exports remain
 byte-identical; all runtime opt-ins stay off. No device access, module load or
 boot occurred. Run the focused test with `CASCADIA_TEST_LINUX` pointing to the
 existing pinned Linux 6.12 tree; a missing compiler/tree is a skip, not a pass.
+
+
+## Bypass supplier capture after a latched fault
+
+A parent event-read error or IRQ-mask operation can latch a fault and queue
+this worker before it starts. The worker previously requested a fresh supplier
+snapshot before checking that latch, placing an unnecessary gauge/source
+operation ahead of its existing inhibit attempt. It now checks the latch under
+`io_lock` first and branches directly to the same bounded fault sequence.
+The ordinary path releases the lock before calling the supplier and retains
+its later locked check. No new register operations or retries are introduced.
+
+The six actual-C fault-worker controls cover the first supplier failure,
+prelatched inhibit/zero-input without supplier capture, repeated-run bounds and
+inactive admission. The pinned previous worker fails the zero-snapshot check.
+A separate old-worker/old-fault control preserves the earlier self-requeue
+counterexample. The affected urgent-queue (7), small-current (18) and
+inactive-zero (4 positive plus 1 historical) controls also pass with explicit
+mock I/O, locks and scheduling. The initial small-current fixture still
+expected a second capture; it was updated while retaining its historical
+counterexample. These are software controls, not a measured shutdown deadline.
+
+Both the current frontend and combined provider pass scoped ARM MODPOST/final
+module links against a separate coherent HDQ-v2/USB-source kernel, with zero
+warnings at one CPU/512 MiB. Existing kernel/configuration inputs are unchanged;
+this is not a complete PR-head build or boot qualification. A fault arriving
+inside an already running supplier call still waits for that call to return.
+Analog initialization/retention and physical charging remain unqualified; all
+activation gates stay unchanged.

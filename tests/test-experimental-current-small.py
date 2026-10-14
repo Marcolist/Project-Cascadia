@@ -113,8 +113,13 @@ static void worker_test(void){
   assert(d.fault_latched&&d.inhibit_attempted&&!d.applied_valid&&d.epoch==1&&snapshots==1&&schedules==1&&pending==1&&f.calls>0);
   unsigned int calls=f.calls,writes=f.writes;pending=0;
   d_worker(&d.work.work);
-  /* No firmware/source grant exists: both attempts received the actual error. */
+  /* A latched fault bypasses later captures; preserve the old worker only
+   * in the independent historical self-requeue counterexample. */
+#ifdef HISTORICAL_BUSY_WORKER
   assert(snapshots==2&&d.epoch==2&&d.fault_latched&&f.calls==calls&&f.writes==writes);
+#else
+  assert(snapshots==1&&d.epoch==1&&d.fault_latched&&f.calls==calls&&f.writes==writes);
+#endif
   assert(schedules==1&&pending==0);
  }
  puts("actual worker two failure iterations/bounded inhibit/no busyloop fixtures PASS");
@@ -250,7 +255,11 @@ int main(int argc,char **argv){assert(argc==2);if(!strncmp(argv[1],"input-",6))i
 '''
   cls.tmp=tempfile.TemporaryDirectory();p=Path(cls.tmp.name);(p/'test.c').write_text(c);cls.bin=p/'test';cls.old=p/'historical-test';cls.epoch_old=p/'historical-epoch-test';cls.input_old=p/'historical-input-test'
   old=(ROOT/'historical-d-fault.c').read_text()
-  (p/'historical.c').write_text(c.replace(function(src,'d_fault'),function(old,'d_fault')))
+  worker_old=(ROOT/'historical-d-worker-prelatched.c').read_text()
+  assert hashlib.sha256(worker_old.encode()).hexdigest()=='1d8984f18bd60e886353a3daa78a5e9360cbb395d0ad40dd994011478ffb853a'
+  busy=c.replace(function(src,'d_worker'),function(worker_old,'d_worker'))
+  busy=busy.replace(function(src,'d_fault'),function(old,'d_fault'))
+  (p/'historical.c').write_text('#define HISTORICAL_BUSY_WORKER 1\n'+busy)
   epoch_old=(ROOT/'historical-d-worker-epoch.c').read_text()
   assert hashlib.sha256(epoch_old.encode()).hexdigest()=='1501b8fb2b96241621eb10c83efe124bfcb2fb5ef7845bc0dfde0b19a5a90256'
   (p/'historical-epoch.c').write_text(c.replace(function(src,'d_worker'),function(epoch_old,'d_worker')))
