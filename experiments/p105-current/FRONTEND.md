@@ -211,3 +211,38 @@ provides source-only default0/opt-in100/500mA descriptors. Actual composite and
 completed EP0/source-reader tests close the former all-zero protocol-budget
 gap for that candidate. The normal gadget remains unchanged; a USB declaration
 does not replace analog protection, calibration or a wall-charger detector.
+
+## Revocation during validator return — 14 October 2026
+
+The worker checked its local epoch before calling the external source validator.
+A source notifier could advance that epoch after the validator captured a true
+result but before it returned. The unchanged-plan path could then publish an
+obsolete plan; the pre-enable path could issue a stale enable, and the final
+check could miss its intended inhibit. Recheck the frontend epoch **after** each
+of these three validator calls. This closes the specified callback window; it
+does not make bus writes atomic with subsequent source revocation.
+
+The existing actual-C small-current fixture now exercises each return window.
+The pre-enable case checks the write trace, since the old worker could enable
+and subsequently inhibit, hiding the defect from a final-register-only test.
+Three exact historical-worker controls fail the corresponding assertions; the
+corrected worker passes. All 13 groups in `test-experimental-current-small.py`
+and the four positive plus one historical control in
+`test-experimental-current-inactive-zero.py` pass with GCC ASan/UBSan, under
+1 CPU / 512 MiB without network or hardware access.
+
+A separate private Linux 6.12 integration now completes a full ARM `vmlinux`
+link and joint MODPOST/final link of `p105-combined-provider.ko` and
+`apple-d1946-experimental.ko`. It includes both DWC2 patches, the corrected HDQ
+snapshot supplier, the adjacent source/current directories and the CDC2
+candidate. DWC2/libcomposite/HDQ and observer/source reader are builtin; the
+combined provider and current controller are modules. All four runtime bools
+remain false and CDC2 demand remains zero. The updated worker then passes an
+incremental module link with zero warnings. Kernel W=1 warnings outside the
+new charging components are retained in the private build logs; this is not a
+warning-free whole-kernel claim.
+
+This qualification uses an empty initramfs source and adds no P105 device tree,
+probe binding or boot bundle. It does not change the normal build or demonstrate
+physical charging. Analog regulation/termination/protection and PMU ownership
+remain prerequisites for runtime activation.

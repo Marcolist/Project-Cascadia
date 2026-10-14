@@ -344,13 +344,17 @@ static void d_worker(struct work_struct *work)
 		input = d_profile_floor(min_t(unsigned int, maximum, 2100));
 		charge = d_charge_for_input(d, input, snapshot.budget_ua);
 	}
+	/* A validator can return its previous result after a concurrent source
+	 * callback advances the frontend epoch. Recheck epoch after each grant
+	 * validation below; this does not make bus I/O atomic with revocation. */
 	/* A fresh unchanged plan needs only status/permission validation. Avoid
 	 * repeatedly toggling the charger on every 100ms telemetry poll. */
 	if (d->applied_valid && d->applied_epoch == epoch &&
 	    d->applied_input == d_decoded_input(input) &&
 	    d->applied_charge ==
 		    min(charge / 40, (unsigned int)d->ceiling) * 40 &&
-	    epoch == atomic_read(&d->epoch) && d_snapshot_valid(d, &snapshot))
+	    epoch == atomic_read(&d->epoch) && d_snapshot_valid(d, &snapshot) &&
+	    epoch == atomic_read(&d->epoch))
 		goto publish;
 	/* Inhibit charge while changing input policy; never enable from stale epoch. */
 	d->applied_valid = false;
@@ -362,7 +366,8 @@ static void d_worker(struct work_struct *work)
 		goto fault;
 	}
 	if (epoch != atomic_read(&d->epoch) ||
-	    !d_snapshot_valid(d, &snapshot) || READ_ONCE(d->stopping)) {
+	    !d_snapshot_valid(d, &snapshot) ||
+	    epoch != atomic_read(&d->epoch) || READ_ONCE(d->stopping)) {
 		ret = -EAGAIN;
 		goto out;
 	}
@@ -375,7 +380,8 @@ static void d_worker(struct work_struct *work)
 	/* A source event can arrive during the final bus write. Inhibit again
 		* on invalidation; this is not a proof of zero transient charge current. */
 	if (epoch != atomic_read(&d->epoch) ||
-	    !d_snapshot_valid(d, &snapshot) || READ_ONCE(d->stopping)) {
+	    !d_snapshot_valid(d, &snapshot) ||
+	    epoch != atomic_read(&d->epoch) || READ_ONCE(d->stopping)) {
 		ret = d1946_current_limit(&d->io, 0, d->ceiling);
 		if (ret) {
 			d_fault(d);

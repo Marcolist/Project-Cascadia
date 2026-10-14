@@ -1,6 +1,6 @@
 from pathlib import Path
-import re,resource,shutil,subprocess,tempfile,unittest
-ROOT=Path(__file__).resolve().parents[1]/'experiments/p105-current'
+import re,resource,shutil,subprocess,tempfile,unittest,os,hashlib
+ROOT=Path(os.environ.get('CASCADIA_CURRENT_ROOT',Path(__file__).resolve().parents[1]/'experiments/p105-current'))
 
 def function(s,n):
  pos=re.search(r'\b'+re.escape(n)+r'\(',s).start();a=s.rfind('\n',0,pos)+1;b=s.index('{',pos);depth=1;e=b+1
@@ -59,15 +59,28 @@ static int failed_snapshot(void *ctx,struct power_supply *i,struct power_supply 
 static bool denied_valid(void *c,const struct d1946_snapshot *s){(void)c;(void)s;return false;}
 static bool owned_usb2_source,allow_usb2_current;
 static struct d1946_snapshot positive_sample;
-static unsigned int validity_calls,deny_at;
+static unsigned int validity_calls,deny_at,invalidate_at,enable_writes,stale_enables;
+static bool validator_revoked;
 static struct d1946_current *active;
 static bool inject_epoch;
 /* Explicit positive supplier/PMU fakes test only the worker policy; they are not
  * produced USB permission, battery calibration or an analog-retention proof. */
 static int explicit_snapshot(void *ctx,struct power_supply *i,struct power_supply *b,struct d1946_snapshot *s){(void)ctx;(void)i;(void)b;snapshots++;if(provider_error)return provider_error;*s=positive_sample;return 0;}
-static bool explicit_valid(void *c,const struct d1946_snapshot *s){(void)c;(void)s;return ++validity_calls!=deny_at;}
+/* Deliberately return a captured true result after frontend revocation. This
+ * models the final validator-return window, not a real source permission. */
+static bool explicit_valid(void *c,const struct d1946_snapshot *s){
+ (void)c;(void)s;validity_calls++;
+ if(validity_calls==invalidate_at){atomic_inc(&active->epoch);validator_revoked=true;}
+ return validity_calls!=deny_at;
+}
 static const struct d1946_current_provider explicit_provider={NULL,explicit_snapshot,explicit_valid};
-static int explicit_write(void *ctx,unsigned int reg,const u8 *bytes,unsigned int n){int ret=write_fake(ctx,reg,bytes,n);if(!ret&&inject_epoch&&reg==0x3f&&n==1&&!(*bytes&0x40)){inject_epoch=false;active->epoch++;}return ret;}
+static int explicit_write(void *ctx,unsigned int reg,const u8 *bytes,unsigned int n){
+ int ret=write_fake(ctx,reg,bytes,n);
+ if(!ret&&reg==0x3f&&n==1&&!(*bytes&0x40)){
+  enable_writes++;if(validator_revoked)stale_enables++;
+  if(inject_epoch){inject_epoch=false;active->epoch++;}
+ }return ret;
+}
 static const struct d1946_current_provider denied_provider={NULL,failed_snapshot,denied_valid};
 static int d_read(void *ctx,unsigned int reg,u8 *out,unsigned int n){struct d1946_current *d=ctx;return d->io.read(d->io.context,reg,out,n);}
 static void power_supply_changed(struct power_supply *p){assert(p);changes++;}
@@ -105,7 +118,7 @@ static void make_small(struct d1946_current *d,struct fake *f,unsigned int budge
  init(d,f);d->provider=&explicit_provider;d->requested_input=500;d->requested_charge=720;d->applied_valid=false;
  d->io.write=explicit_write;active=d;owned_usb2_source=true;allow_usb2_current=enabled;
  positive_sample=(struct d1946_snapshot){.generation=1,.sampled_ns=NSEC_PER_SEC-1,.valid_until_ns=NSEC_PER_SEC+1000,.online=1,.budget_ua=budget,.present=1,.voltage_uv=3900000,.temp_decic=250};
- provider_error=0;validity_calls=deny_at=0;inject_epoch=false;f->regs[0x0a]=8;memset(f->regs+0x0b,0,5);
+ provider_error=0;validity_calls=deny_at=invalidate_at=enable_writes=stale_enables=0;inject_epoch=validator_revoked=false;f->regs[0x0a]=8;memset(f->regs+0x0b,0,5);
 }
 static void plans_test(void){
  const unsigned int budgets[]={0,100000,500000};
@@ -163,12 +176,39 @@ static void failures_test(void){
  }
  puts("actual worker everytransportfailure/noGrant/boundedretry fixtures PASS");
 }
-int main(int argc,char **argv){assert(argc==2);if(!strcmp(argv[1],"plans"))plans_test();else if(!strcmp(argv[1],"stale"))stale_test();else if(!strcmp(argv[1],"health"))health_test();else if(!strcmp(argv[1],"errors"))failures_test();else if(!strcmp(argv[1],"fault"))fault_test();else worker_test();}
+/* Three distinct callback windows; the register fake records actual core
+ * writes. No timing sleeps, UDC grant, PMU or physical safety is emulated. */
+static void validator_epoch_test(const char *phase){
+ struct d1946_current d;struct fake f;make_small(&d,&f,500000,true);
+ d.epoch=7;
+ if(!strcmp(phase,"validator-fast")){
+  d.applied_valid=true;d.applied_epoch=7;d.applied_input=500;d.applied_charge=480;
+  invalidate_at=2;
+ }else if(!strcmp(phase,"validator-pre"))invalidate_at=2;
+ else{assert(!strcmp(phase,"validator-post"));invalidate_at=3;}
+ d_worker(&d.work.work);
+ assert(validator_revoked&&d.epoch==8&&!d.fault_latched);
+ if(!strcmp(phase,"validator-fast"))
+  assert(!d.applied_valid&&"validator_epoch_fastpath");
+ else if(!strcmp(phase,"validator-pre"))
+  assert(!stale_enables&&"validator_epoch_preenable");
+ else
+  assert((f.regs[0x3f]&0x40)&&"validator_epoch_postenable");
+ assert(!d.applied_valid&&(f.regs[0x3f]&0x40));
+ assert(validity_calls==invalidate_at&&stale_enables==0);
+ if(!strcmp(phase,"validator-post"))assert(enable_writes==1);
+ else assert(enable_writes==0);
+ puts("actual worker callback-spanning epoch fixtures PASS");
+}
+int main(int argc,char **argv){assert(argc==2);if(!strncmp(argv[1],"validator-",10))validator_epoch_test(argv[1]);else if(!strcmp(argv[1],"plans"))plans_test();else if(!strcmp(argv[1],"stale"))stale_test();else if(!strcmp(argv[1],"health"))health_test();else if(!strcmp(argv[1],"errors"))failures_test();else if(!strcmp(argv[1],"fault"))fault_test();else worker_test();}
 '''
-  cls.tmp=tempfile.TemporaryDirectory();p=Path(cls.tmp.name);(p/'test.c').write_text(c);cls.bin=p/'test';cls.old=p/'historical-test'
+  cls.tmp=tempfile.TemporaryDirectory();p=Path(cls.tmp.name);(p/'test.c').write_text(c);cls.bin=p/'test';cls.old=p/'historical-test';cls.epoch_old=p/'historical-epoch-test'
   old=(ROOT/'historical-d-fault.c').read_text()
   (p/'historical.c').write_text(c.replace(function(src,'d_fault'),function(old,'d_fault')))
-  for source,target in [('test.c',cls.bin),('historical.c',cls.old)]:
+  epoch_old=(ROOT/'historical-d-worker-epoch.c').read_text()
+  assert hashlib.sha256(epoch_old.encode()).hexdigest()=='1501b8fb2b96241621eb10c83efe124bfcb2fb5ef7845bc0dfde0b19a5a90256'
+  (p/'historical-epoch.c').write_text(c.replace(function(src,'d_worker'),function(epoch_old,'d_worker')))
+  for source,target in [('test.c',cls.bin),('historical.c',cls.old),('historical-epoch.c',cls.epoch_old)]:
    subprocess.run(['gcc','-DCASCADIA_OFFLINE','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-function','-fsanitize=address,undefined','-fno-sanitize-recover=all','-I',str(ROOT),str(p/source),str(ROOT/'d1946-current-core.c'),'-o',str(target)],check=True)
  @classmethod
  def tearDownClass(cls):cls.tmp.cleanup()
@@ -184,4 +224,15 @@ int main(int argc,char **argv){assert(argc==2);if(!strcmp(argv[1],"plans"))plans
   result=subprocess.run([str(self.old),'worker'],text=True,capture_output=True,preexec_fn=no_core)
   self.assertNotEqual(result.returncode,0)
   self.assertIn('schedules==1&&pending==0',result.stderr)
+ def test_actual_validator_fastpath_epoch(self):self.run_case('validator-fast')
+ def test_actual_validator_preenable_epoch(self):self.run_case('validator-pre')
+ def test_actual_validator_postenable_epoch(self):self.run_case('validator-post')
+ def historical_epoch_case(self,phase,marker):
+  def no_core():resource.setrlimit(resource.RLIMIT_CORE,(0,0))
+  result=subprocess.run([str(self.epoch_old),phase],text=True,capture_output=True,preexec_fn=no_core,timeout=10)
+  self.assertNotEqual(result.returncode,0)
+  self.assertIn(marker,result.stderr)
+ def test_historical_validator_fastpath_epoch(self):self.historical_epoch_case('validator-fast','validator_epoch_fastpath')
+ def test_historical_validator_preenable_epoch(self):self.historical_epoch_case('validator-pre','validator_epoch_preenable')
+ def test_historical_validator_postenable_epoch(self):self.historical_epoch_case('validator-post','validator_epoch_postenable')
 if __name__=='__main__':unittest.main()
