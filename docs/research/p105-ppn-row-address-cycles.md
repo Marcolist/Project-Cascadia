@@ -127,3 +127,46 @@ control-word write justifies changing Linux's accepted statuses. The connected
 unit's physical fault cause, protocol profile and suitable recovery remain
 unidentified. No new read or reset was attempted, and this documentation update
 changes neither the candidate code nor any recorded ARM artifact.
+
+## Fixed bootloader cache: source qualification and blocked observation
+
+A narrower way to seek the unit's revision was investigated without another
+NAND transaction. In the hash-pinned 12H321 iBEC above, `h2fmiInit` copies
+eight bytes of the initial bus-0 READID buffer to static RAM `0x9ff50000`
+at `9ff03042..304a`. The copy precedes the PPN-prefix check and subsequent
+bus-1 fallback/merging. `h2fmiPrintConfig` at `9ff03ab4` reads the first six
+bytes there; bytes 3/4/5 encode the cached revision. This is historical bus-0
+information, not a witness of successful initialization or current geometry.
+
+The actual uploaded plaintext Img3 has SHA-256
+`22237959161dab1eb514962bd4d5e498830470050af026cc4f95c83a6e3ee9c7`.
+Its DATA payload starts at offset 64; 78 selected code/literal regions match
+the original image, including this copy and the entry BSS-clear sequence.
+Regular ARM entry clears `[9ff44840,9ff535e8)`, which includes the cache.
+The frozen loader contains data-cache clean/invalidate and L2 clean handling.
+The cache is above declared Linux RAM; these source checks do not prove its
+complete later lifetime or physical preservation. No dynamic FMI/PPN pointer
+or heap region was followed.
+
+On 2026-10-14, a private one-shot helper was reviewed and checked with eight
+actual-C stubbed-I/O/argument controls, then built as strict static ARM code.
+It opens `/dev/mem` read-only and makes exactly one six-byte `pread` at this
+fixed address, with no retry, scan, mmap, pointer follow or write. Only this
+helper was staged in a temporary `/run` tmpfs directory; it is not firmware.
+With battery 58% and temperature 31.3 C, that single call returned `EFAULT`
+("Bad address"). No ID bytes were obtained. Its own file and directory were
+removed immediately, and no alternative mapping or repeated read was tried.
+
+Linux 6.12 `drivers/char/mem.c:read_mem` rejects an invalid physical range
+with `EFAULT` before copying. ARM's `arch/arm/mm/mmap.c:valid_phys_addr_range`
+limits reads to `__pa(high_memory - 1) + 1`; `arch/arm/mm/mmu.c` derives
+`high_memory` from `arm_lowmem_limit`. The live `/proc/iomem` lists System RAM
+only through `0x9f5fffff`. The refusal is consistent with the bootloader cache
+being outside Linux's low-memory range; the exact returning branch was not
+instrumented. There was no attempt to relax the kernel boundary.
+
+This negative observation does not identify the PPN revision or validate the
+four-cycle candidate. Draft status and all device-profile qualification
+requirements remain. No NAND command, controller reset, program/erase or
+new boot occurred, and the candidate's production code and ARM artifacts
+are unchanged.
