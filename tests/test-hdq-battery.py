@@ -62,6 +62,7 @@ enum { POWER_SUPPLY_TECHNOLOGY_LIPO, POWER_SUPPLY_STATUS_FULL,
  POWER_SUPPLY_STATUS_NOT_CHARGING };
 static unsigned long jiffies;
 static unsigned char uart[128];
+static uint8_t tx[8];
 static unsigned int ucon, rx_index, rx_count, tx_count, phase;
 static bool stuck_break;
 static uint8_t response = 0xa6;
@@ -70,8 +71,10 @@ static unsigned int readl(void *addr) {
  if (offset == 4) return stuck_break ? ucon : ucon & ~BIT(4);
  if (offset == 0x10) return phase == 2 && rx_index < rx_count;
  if (offset == 0x24) {
-  unsigned bit = rx_index < 8 ? 0 : (response >> (rx_index - 8)) & 1;
-  rx_index++;
+  unsigned index = rx_index++;
+  /* The one-wire receiver echoes the bytes actually written by the host. */
+  if (index < 8) return tx[index];
+  unsigned bit = (response >> (index - 8)) & 1;
   return bit ? 0xfe : 0xe0;
  }
  return 0;
@@ -79,7 +82,10 @@ static unsigned int readl(void *addr) {
 static void writel(unsigned value, void *addr) {
  unsigned offset = (unsigned)((unsigned char *)addr - uart);
  if (offset == 4) ucon = value;
- if (offset == 0x20) { assert(value == 0xfe || value == 0xe0); tx_count++; }
+ if (offset == 0x20) {
+  assert((value == 0xfe || value == 0xe0) && tx_count < 8);
+  tx[tx_count++] = value;
+ }
 }
 static void udelay(unsigned n) { (void)n; jiffies++; }
 static void usleep_range(unsigned a, unsigned b) { (void)a; (void)b; phase = 2; }
