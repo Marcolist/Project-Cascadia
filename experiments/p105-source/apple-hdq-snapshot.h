@@ -9,6 +9,8 @@ struct power_supply;
 struct apple_hdq_sample {
 	u64 generation, begin_ns, end_ns, valid_until_ns;
 	int voltage_uv, current_ua, temp_decic, flags, gauge_present;
+	/* Same completed burst as voltage/current; no separate sysfs cache read. */
+	int capacity_percent, charge_now_uah, charge_full_uah;
 };
 /* Opaque borrow acquired only from the consumer platform driver's probe.
  * Caller must already hold a live power_supply reference. The managed link
@@ -20,6 +22,10 @@ struct apple_hdq_sample {
  * There is no automatic DT/provider integration in this private candidate. */
 struct device;
 struct apple_hdq_reader;
+/* Larger output requires a new exported symbol: an old consumer allocates a
+ * smaller buffer. Reject mixed modules at symbol resolution, not at runtime.
+ * Source aliases keep callers readable; all consumers must be rebuilt. */
+#define apple_hdq_reader_snapshot apple_hdq_reader_snapshot_v2
 struct apple_hdq_reader *apple_hdq_reader_open(struct device *,
 					       struct power_supply *);
 /* Managed variant closes before managed links are cleaned. Consumer remove

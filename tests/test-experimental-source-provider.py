@@ -183,17 +183,18 @@ static int set_alt(struct usb_function *f,unsigned int a,unsigned int b){(void)f
         c += src[src.index('#define ULCON'):src.index('static void hdq_drain')]
         c += r'''
 static unsigned int byte_reads,fail_byte,source_change_byte;
+static unsigned int fixture_soc,fixture_rm,fixture_fcc;
 static int fake_read8(struct hdq_battery *b,u8 reg){
  assert(b->lock.locked);byte_reads++;now_ns+=5000000;jiffies=now_ns/(NSEC_PER_SEC/HZ);
  if(byte_reads==source_change_byte)p105_udc_invalidate(&controller.p105_power_observer,P105_UDC_DISCONNECT);
  if(byte_reads==fail_byte)return -ETIMEDOUT;
  switch(reg&~1U){
- case BQ_SOC:return reg&1?0:64;
+ case BQ_SOC:return reg&1?fixture_soc>>8:fixture_soc&255;
  case BQ_VOLT:return reg&1?3900>>8:3900&255;
  case BQ_AI:return 255;
  case BQ_TEMP:return reg&1?2981>>8:2981&255;
- case BQ_RM:return reg&1?2500>>8:2500&255;
- case BQ_FCC:return reg&1?4000>>8:4000&255;
+ case BQ_RM:return reg&1?fixture_rm>>8:fixture_rm&255;
+ case BQ_FCC:return reg&1?fixture_fcc>>8:fixture_fcc&255;
  case BQ_FLAGS:return 0;
  case BQ_CYCT:return reg&1?0:25;
  case BQ_DCAP:return reg&1?4400>>8:4400&255;
@@ -229,6 +230,7 @@ static void init(void){
  cfg=(struct usb_configuration){.bConfigurationValue=1,.MaxPower=500,.interface={&f}};
  cdev=(struct usb_composite_dev){.gadget=&controller.gadget,.configs={&cfg}};
  now_ns=NSEC_PER_SEC;jiffies=HZ;byte_reads=fail_byte=source_change_byte=0;alt_result=0;
+ fixture_soc=64;fixture_rm=2500;fixture_fcc=4000;
  requested_draw=0;allocation_fail_at=alloc_calls=link_fail_at=link_calls=context_reads=0;module_live=true;
 }
 static u64 configure(unsigned int ma,int result,bool complete){
@@ -339,7 +341,31 @@ static void present_tests(void){
  puts("PRESENT errno/output retention/invalidation fixtures PASS");
 }
 
+static void charge_trace_tests(void){
+ init();struct apple_hdq_sample s,old;
+ struct apple_hdq_reader *r=apple_hdq_reader_open(&consumer,&psy);assert(!IS_ERR(r));
+ assert(!apple_hdq_reader_snapshot(r,NSEC_PER_SEC,&s));
+ assert(s.capacity_percent==64&&s.charge_now_uah==2500000&&s.charge_full_uah==4000000);
+ assert(s.current_ua==-1000&&s.gauge_present==1&&byte_reads==27);
+ old=s;fixture_soc=65;fixture_rm=2510;fixture_fcc=4010;
+ assert(!apple_hdq_reader_snapshot(r,NSEC_PER_SEC,&s)&&byte_reads==27);
+ assert(s.generation==old.generation&&s.charge_now_uah==old.charge_now_uah);
+ now_ns=s.valid_until_ns;
+ assert(!apple_hdq_reader_valid(r,&s));
+ assert(!apple_hdq_reader_snapshot(r,NSEC_PER_SEC,&s)&&byte_reads==54);
+ assert(s.generation>old.generation&&!apple_hdq_reader_valid(r,&old));
+ assert(s.capacity_percent==65&&s.charge_now_uah==2510000&&s.charge_full_uah==4010000);
+ old=s;now_ns=s.valid_until_ns;fixture_rm=2520;fail_byte=byte_reads+17;
+ assert(apple_hdq_reader_snapshot(r,NSEC_PER_SEC,&s)==-ETIMEDOUT);
+ assert(!memcmp(&old,&s,sizeof(s))&&!apple_hdq_reader_valid(r,&old));
+ fail_byte=0;fixture_soc=101;
+ assert(apple_hdq_reader_snapshot(r,NSEC_PER_SEC,&s)==-ERANGE&&!memcmp(&old,&s,sizeof(s)));
+ apple_hdq_reader_close(r);
+ puts("charge trace complete burst/cache/expiry/partial failure/invalid SOC fixtures PASS");
+}
+
 int main(int argc,char **argv){assert(argc==2);
+ if(!strcmp(argv[1],"charge-trace")){charge_trace_tests();assert(!allocs&&!module_refs&&!supply_refs&&!consumer.refs&&!source_device.refs&&!gauge_device.refs);return 0;}
  if(!strcmp(argv[1],"present"))present_tests();else if(!strcmp(argv[1],"source"))source_tests();else if(!strcmp(argv[1],"invalidate"))invalidation_tests();else if(!strcmp(argv[1],"lifetime"))lifecycle_tests();else if(!strcmp(argv[1],"combined"))combined_tests();else transport_tests();
  assert(!allocs&&!module_refs&&!supply_refs&&!consumer.refs&&!source_device.refs&&!gauge_device.refs);
 }
@@ -363,5 +389,6 @@ int main(int argc,char **argv){assert(argc==2);
     def test_actual_combined_source_and_hdq_tuple(self): self.run_fixture('combined')
     def test_actual_transport_errors_and_source_change(self): self.run_fixture('transport')
     def test_present_preserves_transport_errno_and_caller_output(self): self.run_fixture('present')
+    def test_charge_trace_fields_share_complete_burst_and_expiry(self): self.run_fixture('charge-trace')
 
 if __name__ == '__main__': unittest.main()

@@ -324,6 +324,9 @@ static int hdq_get_snapshot(struct hdq_battery *b, u64 max_age_ns,
 		.temp_decic = b->temp - 2731,
 		.flags = b->flags,
 		.gauge_present = 1,
+		.capacity_percent = b->soc,
+		.charge_now_uah = b->rm * 1000,
+		.charge_full_uah = b->fcc * 1000,
 	};
 out:
 	mutex_unlock(&b->lock);

@@ -252,3 +252,34 @@ charging. Rejection occurred after the timestamp deadline; concurrent refresh
 can also invalidate an old generation, so expiry is not claimed as its sole
 possible invalidation cause. No charge-current actuator or combined USB provider
 was installed. The input budget and analog safety prerequisites remain open.
+# Charge-trend fields in the bounded HDQ snapshot
+
+The experimental HDQ reader now includes `capacity_percent`, `charge_now_uah`
+and `charge_full_uah` from the same completed, locked sampling burst as voltage,
+signed current and temperature. These values were already read into the cache;
+this adds no UART transactions. A future RAM recorder can inspect the minimum
+battery level and stored-charge trend using the existing generation and expiry
+contract instead of mixing independently timed sysfs reads.
+
+The output structure is larger. The header aliases the source API to a new
+`apple_hdq_reader_snapshot_v2` export: old consumers with smaller buffers cannot
+resolve the old snapshot symbol against this provider. Rebuild every consumer
+with the matching header; do not mix saved module artifacts. This is an
+experimental kernel interface, not a stable userspace ABI.
+
+The actual-C source/provider suite passes seven groups with ASan/UBSan and
+Werror. The added group checks units, cache reuse without extra reads, replacement
+and expiry, a late FCC read failure without partial output, and invalid SOC.
+The preceding source fails the new field-propagation assertion. A private ARM
+HDQ provider and existing read-once consumer pass joint MODPOST/link; the combined
+provider passes object compilation with the same header. ELF checks show the
+new export/reference in all three. These bounded W=1/Werror builds emit no
+warnings; a full integrated kernel/module set was not rebuilt or booted.
+
+This prepares a measurement interface; it does not implement a local recorder,
+qualify physical sensor calibration, enable charging or prove source-loss
+cutoff. Ordinary sysfs has no exported sample generation and must not be used
+to fabricate freshness. A USB-SSH disconnect alone is not a source-loss test
+result. Analog initialization/retention and the physical fault/source-loss
+response remain unqualified. Normal overlay, configuration and boot artifacts
+are unchanged.
