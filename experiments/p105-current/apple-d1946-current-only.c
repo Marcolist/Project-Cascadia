@@ -359,6 +359,16 @@ static void d_worker(struct work_struct *work)
 	/* Inhibit charge while changing input policy; never enable from stale epoch. */
 	d->applied_valid = false;
 	ret = d1946_current_limit(&d->io, 0, d->ceiling);
+	/* Inhibit even after revocation, but never start a new positive input
+	 * plan from a snapshot whose epoch/lease is already known stale. The
+	 * callback can revoke during valid(), so recheck epoch after it too. */
+	if (!ret && input &&
+	    (epoch != atomic_read(&d->epoch) ||
+	     !d_snapshot_valid(d, &snapshot) ||
+	     epoch != atomic_read(&d->epoch) || READ_ONCE(d->stopping))) {
+		ret = -EAGAIN;
+		goto out;
+	}
 	if (!ret)
 		ret = d1946_input_limit(&d->io, input);
 	if (ret) {

@@ -61,6 +61,7 @@ static bool owned_usb2_source,allow_usb2_current;
 static struct d1946_snapshot positive_sample;
 static unsigned int validity_calls,deny_at,invalidate_at,enable_writes,stale_enables;
 static bool validator_revoked;
+static unsigned int input_program_writes,stale_input_program_writes,inhibit_writes;
 static struct d1946_current *active;
 static bool inject_epoch;
 /* Explicit positive supplier/PMU fakes test only the worker policy; they are not
@@ -76,6 +77,10 @@ static bool explicit_valid(void *c,const struct d1946_snapshot *s){
 static const struct d1946_current_provider explicit_provider={NULL,explicit_snapshot,explicit_valid};
 static int explicit_write(void *ctx,unsigned int reg,const u8 *bytes,unsigned int n){
  int ret=write_fake(ctx,reg,bytes,n);
+ if(!ret&&n==1&&((reg==0x1b&&!(*bytes&4))||(reg==0x1c&&!(*bytes&0x80))||(reg==0x3d&&*bytes))){
+  input_program_writes++;if(validator_revoked)stale_input_program_writes++;
+ }
+ if(!ret&&reg==0x3f&&n==1&&(*bytes&0x40))inhibit_writes++;
  if(!ret&&reg==0x3f&&n==1&&!(*bytes&0x40)){
   enable_writes++;if(validator_revoked)stale_enables++;
   if(inject_epoch){inject_epoch=false;active->epoch++;}
@@ -118,7 +123,7 @@ static void make_small(struct d1946_current *d,struct fake *f,unsigned int budge
  init(d,f);d->provider=&explicit_provider;d->requested_input=500;d->requested_charge=720;d->applied_valid=false;
  d->io.write=explicit_write;active=d;owned_usb2_source=true;allow_usb2_current=enabled;
  positive_sample=(struct d1946_snapshot){.generation=1,.sampled_ns=NSEC_PER_SEC-1,.valid_until_ns=NSEC_PER_SEC+1000,.online=1,.budget_ua=budget,.present=1,.voltage_uv=3900000,.temp_decic=250};
- provider_error=0;validity_calls=deny_at=invalidate_at=enable_writes=stale_enables=0;inject_epoch=validator_revoked=false;f->regs[0x0a]=8;memset(f->regs+0x0b,0,5);
+ provider_error=0;validity_calls=deny_at=invalidate_at=enable_writes=stale_enables=0;input_program_writes=stale_input_program_writes=inhibit_writes=0;inject_epoch=validator_revoked=false;f->regs[0x0a]=8;memset(f->regs+0x0b,0,5);
 }
 static void plans_test(void){
  const unsigned int budgets[]={0,100000,500000};
@@ -144,7 +149,7 @@ static void plans_test(void){
 }
 static void stale_test(void){
  struct d1946_current d;struct fake f;
- for(unsigned int at=1;at<=3;at++){
+ for(unsigned int at=1;at<=4;at++){
   make_small(&d,&f,500000,true);deny_at=at;d_worker(&d.work.work);
   assert(!d.applied_valid&&(f.regs[0x3f]&0x40));
   if(at==1)assert(d.fault_latched);
@@ -184,8 +189,19 @@ static void validator_epoch_test(const char *phase){
  if(!strcmp(phase,"validator-fast")){
   d.applied_valid=true;d.applied_epoch=7;d.applied_input=500;d.applied_charge=480;
   invalidate_at=2;
- }else if(!strcmp(phase,"validator-pre"))invalidate_at=2;
- else{assert(!strcmp(phase,"validator-post"));invalidate_at=3;}
+ }else if(!strcmp(phase,"validator-pre")){
+#ifdef CASCADIA_HISTORICAL_EPOCH_WORKER
+  invalidate_at=2;
+#else
+  invalidate_at=3;
+#endif
+ }else{assert(!strcmp(phase,"validator-post"));
+#ifdef CASCADIA_HISTORICAL_EPOCH_WORKER
+  invalidate_at=3;
+#else
+  invalidate_at=4;
+#endif
+ }
  d_worker(&d.work.work);
  assert(validator_revoked&&d.epoch==8&&!d.fault_latched);
  if(!strcmp(phase,"validator-fast"))
@@ -200,16 +216,48 @@ static void validator_epoch_test(const char *phase){
  else assert(enable_writes==0);
  puts("actual worker callback-spanning epoch fixtures PASS");
 }
-int main(int argc,char **argv){assert(argc==2);if(!strncmp(argv[1],"validator-",10))validator_epoch_test(argv[1]);else if(!strcmp(argv[1],"plans"))plans_test();else if(!strcmp(argv[1],"stale"))stale_test();else if(!strcmp(argv[1],"health"))health_test();else if(!strcmp(argv[1],"errors"))failures_test();else if(!strcmp(argv[1],"fault"))fault_test();else worker_test();}
+
+static void input_revocation_test(const char *phase){
+ struct d1946_current d;struct fake f;make_small(&d,&f,500000,true);d.epoch=7;
+ /* Start with a known zero-input profile and an uninhibited charge-control
+  * byte, so unconditional inhibit and fresh positive input writes are visible. */
+ f.regs[0x1b]|=4;f.regs[0x1c]|=0x80;f.regs[0x3d]=0;f.regs[0x3f]&=~0x40;
+ if(!strcmp(phase,"input-initial"))invalidate_at=1;
+ else if(!strcmp(phase,"input-validator"))invalidate_at=2;
+ else if(!strcmp(phase,"input-zero")){
+  /* Prove a zero request actually clears a prior positive input profile even
+   * after revocation; a pre-existing zero profile would not test admission. */
+  f.regs[0x1b]&=~4;f.regs[0x1c]&=~0x80;f.regs[0x3d]=34;
+  d.requested_input=0;invalidate_at=1;
+ }
+ else assert(!strcmp(phase,"input-fresh"));
+ d_worker(&d.work.work);
+ if(!strcmp(phase,"input-fresh")){
+  assert(d.applied_valid&&input_program_writes>0&&!stale_input_program_writes);
+  assert(f.regs[0x3d]==34&&!(f.regs[0x1b]&4)&&!(f.regs[0x1c]&0x80));
+ }else{
+  assert(validator_revoked&&d.epoch==8&&!d.applied_valid&&!d.fault_latched);
+  assert((f.regs[0x3f]&0x40)&&inhibit_writes>0); /* inhibit cannot be skipped */
+  fprintf(stderr,"input admission fixture: positive_writes=%u stale_writes=%u code3d=%u; physical draw unmeasured\n",input_program_writes,stale_input_program_writes,f.regs[0x3d]);
+  assert(stale_input_program_writes==0&&"stale_positive_input_program");
+  assert(input_program_writes==0&&f.regs[0x3d]==0&&(f.regs[0x1b]&4)&&(f.regs[0x1c]&0x80));
+ }
+ puts("actual worker input admission/inhibit/zero-plan fixtures PASS");
+}
+
+int main(int argc,char **argv){assert(argc==2);if(!strncmp(argv[1],"input-",6))input_revocation_test(argv[1]);else if(!strncmp(argv[1],"validator-",10))validator_epoch_test(argv[1]);else if(!strcmp(argv[1],"plans"))plans_test();else if(!strcmp(argv[1],"stale"))stale_test();else if(!strcmp(argv[1],"health"))health_test();else if(!strcmp(argv[1],"errors"))failures_test();else if(!strcmp(argv[1],"fault"))fault_test();else worker_test();}
 '''
-  cls.tmp=tempfile.TemporaryDirectory();p=Path(cls.tmp.name);(p/'test.c').write_text(c);cls.bin=p/'test';cls.old=p/'historical-test';cls.epoch_old=p/'historical-epoch-test'
+  cls.tmp=tempfile.TemporaryDirectory();p=Path(cls.tmp.name);(p/'test.c').write_text(c);cls.bin=p/'test';cls.old=p/'historical-test';cls.epoch_old=p/'historical-epoch-test';cls.input_old=p/'historical-input-test'
   old=(ROOT/'historical-d-fault.c').read_text()
   (p/'historical.c').write_text(c.replace(function(src,'d_fault'),function(old,'d_fault')))
   epoch_old=(ROOT/'historical-d-worker-epoch.c').read_text()
   assert hashlib.sha256(epoch_old.encode()).hexdigest()=='1501b8fb2b96241621eb10c83efe124bfcb2fb5ef7845bc0dfde0b19a5a90256'
   (p/'historical-epoch.c').write_text(c.replace(function(src,'d_worker'),function(epoch_old,'d_worker')))
-  for source,target in [('test.c',cls.bin),('historical.c',cls.old),('historical-epoch.c',cls.epoch_old)]:
-   subprocess.run(['gcc','-DCASCADIA_OFFLINE','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-function','-fsanitize=address,undefined','-fno-sanitize-recover=all','-I',str(ROOT),str(p/source),str(ROOT/'d1946-current-core.c'),'-o',str(target)],check=True)
+  input_old=(ROOT/'historical-d-worker-input-revocation.c').read_text()
+  assert hashlib.sha256(input_old.encode()).hexdigest()=='3e5aa9e3f06d16f592de9b2de01f0656c566d33157834ffa4ac6ce3acd48c65d'
+  (p/'historical-input.c').write_text(c.replace(function(src,'d_worker'),function(input_old,'d_worker')))
+  for source,target in [('test.c',cls.bin),('historical.c',cls.old),('historical-epoch.c',cls.epoch_old),('historical-input.c',cls.input_old)]:
+   subprocess.run(['gcc',*(['-DCASCADIA_HISTORICAL_EPOCH_WORKER'] if source=='historical-epoch.c' else []),'-DCASCADIA_OFFLINE','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-function','-fsanitize=address,undefined','-fno-sanitize-recover=all','-I',str(ROOT),str(p/source),str(ROOT/'d1946-current-core.c'),'-o',str(target)],check=True)
  @classmethod
  def tearDownClass(cls):cls.tmp.cleanup()
  def run_case(self,name):self.assertIn('fixtures PASS',subprocess.check_output([str(self.bin),name],text=True,timeout=10))
@@ -227,6 +275,17 @@ int main(int argc,char **argv){assert(argc==2);if(!strncmp(argv[1],"validator-",
  def test_actual_validator_fastpath_epoch(self):self.run_case('validator-fast')
  def test_actual_validator_preenable_epoch(self):self.run_case('validator-pre')
  def test_actual_validator_postenable_epoch(self):self.run_case('validator-post')
+ def test_actual_positive_input_initial_validator_revocation(self):self.run_case('input-initial')
+ def test_actual_positive_input_preinput_validator_revocation(self):self.run_case('input-validator')
+ def test_actual_zero_input_remains_allowed_on_revocation(self):self.run_case('input-zero')
+ def test_actual_fresh_input_still_programs_profile(self):self.run_case('input-fresh')
+ def test_historical_initial_validator_programs_stale_input(self):
+  def no_core():resource.setrlimit(resource.RLIMIT_CORE,(0,0))
+  result=subprocess.run([str(self.input_old),'input-initial'],text=True,capture_output=True,preexec_fn=no_core,timeout=10)
+  self.assertNotEqual(result.returncode,0)
+  self.assertIn('stale_positive_input_program',result.stderr)
+  self.assertIn('stale_writes=3',result.stderr)
+  print('historical input control (expected rejection): '+result.stderr.splitlines()[0])
  def historical_epoch_case(self,phase,marker):
   def no_core():resource.setrlimit(resource.RLIMIT_CORE,(0,0))
   result=subprocess.run([str(self.epoch_old),phase],text=True,capture_output=True,preexec_fn=no_core,timeout=10)

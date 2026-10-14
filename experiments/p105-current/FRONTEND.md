@@ -300,3 +300,34 @@ entry point is closed in that profile, with real Kconfig n/y/m and initializer
 regressions plus a complete ARM link. See the [parent exclusion evidence](../p105-parent-pmu/EVIDENCE.md#exclude-unlocked-adapter-retry-changes--14-october-2026).
 This supersedes that specific private-profile limitation, not the analog or
 physical-cutoff requirements. The running kernel remains unchanged.
+
+## Revoke positive input plans before programming — 14 October 2026
+
+The first snapshot validator can return its captured true result after a source
+notification has already advanced the frontend epoch. The earlier worker then
+inhibited charging but still programmed a positive input profile before its
+later epoch check prevented charge enable. That later check was too late for
+the input-policy writes themselves.
+
+Keep the unconditional initial inhibit. Before starting a positive input plan,
+check epoch, snapshot validity, epoch again and stop state. Known stale plans
+exit without those input writes; zero-input programming remains allowed. An
+inhibit failure still follows the existing fault path. This is admission before
+a multi-register plan, not an atomic source lease across its transfers or proof
+of instantaneous physical cutoff.
+
+The existing actual-C small-current suite now passes 18 groups under ASan/UBSan
+and Werror. New cases cover initial validator revocation, revocation during the
+new input validator, a fresh positive plan, and actual positive-to-zero input
+programming despite revocation. A pinned historical worker writes three positive
+input registers after revocation in the counterexample and fails the new trace
+assertion. Existing pre/post-charge validator tests use explicit old/new call
+indices to continue testing the same semantic phases. These are register writes
+in the fixture; no physical input current was measured.
+
+The corrected ARM current module passes incremental MODPOST/final link with zero
+warnings. The already qualified private kernel, combined module, configuration
+and symbol exports remain byte-identical. Runtime bools remain false. Separately,
+[disabled device-tree wiring](DT_WIRING.md) now describes the existing PMU IRQ,
+battery and USB connections for an offline test candidate; it is not embedded
+in this kernel or included by the normal build. No module or DT was transferred.
