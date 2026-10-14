@@ -293,3 +293,10 @@ kernel retains `I2C_CHARDEV=y`, so the documented retry-immutability limitation
 is explicitly unresolved. The empty-source 512-byte initramfs contains only
 `dev`, `dev/console` and `root`; this is not a usable boot package and was not
 transferred or booted.
+
+The next private profile now excludes builtin and modular `i2c-dev`; the parent
+also rejects forced builds containing either. The known unlocked retry ioctl
+entry point is closed in that profile, with real Kconfig n/y/m and initializer
+regressions plus a complete ARM link. See the [parent exclusion evidence](../p105-parent-pmu/EVIDENCE.md#exclude-unlocked-adapter-retry-changes--14-october-2026).
+This supersedes that specific private-profile limitation, not the analog or
+physical-cutoff requirements. The running kernel remains unchanged.

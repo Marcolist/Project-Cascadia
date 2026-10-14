@@ -15,6 +15,11 @@
 
 int d1946_bank0_init(struct d1946_bank0_bus *b, struct i2c_client *client)
 {
+	/* i2c-dev can change adapter retries without taking the segment lock.
+	 * Refuse both builtin and modular access, including forced builds. */
+#if defined(CONFIG_I2C_CHARDEV) || defined(CONFIG_I2C_CHARDEV_MODULE)
+	return -EOPNOTSUPP;
+#endif
 	if (IS_ERR_OR_NULL(b) || IS_ERR_OR_NULL(client) ||
 	    IS_ERR_OR_NULL(client->adapter) || client->addr != BANK0_ADDR ||
 	    client->flags || IS_ERR_OR_NULL(client->adapter->algo) ||

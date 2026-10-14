@@ -26,7 +26,7 @@ New `apple-pmu-d1946-bank0.c/.h` supplies real raw regmap read/write callbacks. 
 
 The single parent config uses sleepable custom lock/unlock: **map mutex→I2C adapter segment lock→A5 driver's mutex/spinlock**. Both selector and data use `__i2c_transfer` under that adapter lock. A Linux `regmap_update_bits_base` call holds the lock over its whole native read/modify/write, so raw I2C traffic cannot enter between those callbacks. Distinct Regmap calls remain separate: raw traffic can run between WLED writes, between update_bits and a later readback, or between ADC-conversion steps. Reselecting0 on every next callback handles a preceding raw bank change; it does not provide a multistep ALL-ADC conversion reservation, atomic brightness update or current grant.
 
-Actual A5 adapter initializes no retries field, so a fresh adapter has0. Init and each transfer reject nonzero retries without modifying global adapter settings. **Important concrete integration boundary:** Linux6.12 `drivers/i2c/i2c-dev.c:484..488` assigns `adapter->retries` for `I2C_RETRIES` without the adapter lock. `__i2c_transfer` uses that field for EAGAIN retries. Thus adapter locking/prechecks do **not** prove retry/config immutability during a transfer. This draft explicitly requires adapter algorithm/config/retries and context resources to remain immutable for its lifetime; no existing kernel mechanism in this draft enforces that against such ioctls. No I2C-dev removal, global configuration write or alternate A5-leaf implementation is included. Runtime activation is not qualified by the offline tests.
+Actual A5 adapter initializes no retries field, so a fresh adapter has0. Init and each transfer reject nonzero retries without modifying global adapter settings. Linux6.12 `drivers/i2c/i2c-dev.c:484..488` assigns `adapter->retries` for `I2C_RETRIES` without the adapter lock, and `__i2c_transfer` reads it during EAGAIN retry decisions. Adapter locking/prechecks alone therefore did not close that race. The experiment now requires **`I2C_CHARDEV = n`** and its initializer also rejects either builtin or modular i2c-dev in forced builds before touching any state. This excludes the known in-tree ioctl entry point; normal Cascadia configuration is unchanged. The requirement that adapter algorithm/config/context remain stable still applies to other kernel users; this is not universal protection against arbitrary external modules or analog safety qualification.
 
 ## Poweroff bypass and lifetime
 
@@ -78,5 +78,43 @@ The targeted [current binding fixture](../../tests/test-experimental-parent-curr
 passes five positive groups and an expected historical negative control under
 ASan/UBSan. It uses driver-core fakes and only the real probe prefix before the
 first allocation; actual full-kernel lifetime behavior is source-reviewed, not
-hardware-tested. The adapter-retry ioctl, analog and event-ownership boundaries
-above are unchanged. No normal build enables this interface.
+hardware-tested. The analog and event-ownership boundaries above remain. The later exclusion
+below closes the known adapter-retry ioctl entry point. No normal build enables
+this interface.
+
+
+## Exclude unlocked adapter retry changes — 14 October 2026
+
+The dependency uses `I2C_CHARDEV = n`, not `!I2C_CHARDEV`: negating `m` still
+produces `m`, which Linux Kconfig can promote for this boolean option. The
+initializer independently rejects both `CONFIG_I2C_CHARDEV` and
+`CONFIG_I2C_CHARDEV_MODULE` before pointer access, lock initialization or state
+changes. This also covers a manually forced compilation. Existing per-transfer
+checks remain; no global adapter value is changed and no core validation is
+bypassed by calling the hardware algorithm directly.
+
+The new `test-experimental-parent-no-i2cdev.py` compiles the actual initializer
+for n/y/m under ASan/UBSan and Werror. The n path initializes; y/m return
+`-EOPNOTSUPP` without mutations. Two SHA-pinned historical-function controls fail
+that rejection contract with expected exit23. With `--conf` pointing to an
+existing Linux `scripts/kconfig/conf`, six additional checks run the actual
+fragment: n accepted, y/m rejected; the former dependency accepts y/m and the
+incorrect negated dependency accepts m. No Kconfig parser is modeled in Python.
+Without that executable the script explicitly reports those checks skipped.
+The ten existing parent transport regressions also pass.
+
+Source review of the actual A5 adapter and generic I2C core found no additional
+retry setter there; other adapter drivers' initialization does not modify this
+A5 instance. This is a bounded in-tree finding, not a guarantee against unknown
+kernel clients. Analog voltage/termination/protection, event ownership and real
+source-loss cutoff remain unqualified. No device operation follows from these
+checks.
+
+The new private profile sets `I2C_CHARDEV=n`; full ARM `vmlinux` and both charging
+modules pass their joint MODPOST/link in 31.568 seconds under 2 CPUs / 1 GiB,
+with zero warnings in this incremental build. Configuration and linked symbols
+confirm no i2c-dev implementation, while the parent export/current dependency
+remain present. Compiled parent/current/gadget defaults are still zero. The
+normal build and the live kernel retain their original configuration; no live
+module removal or boot occurred. This private link stand has only the default
+512-byte empty-source initramfs and is not a boot package.
