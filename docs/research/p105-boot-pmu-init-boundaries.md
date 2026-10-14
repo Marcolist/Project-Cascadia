@@ -194,3 +194,35 @@ The original iBSS initializer performs104 fake transfers in the selected revisio
 The [actual END/TO recovery audit](p105-eoc-recovery.md) further executes7 source-method groups plus3 complete consumer/recovery groups. A failed41 restoration still clears the native software timeout reference. Linux retains the fault and performs no automatic recovery pulse.
 
 Private independent repeat logs: analog-tables-root-repeat-v1.log, analog-write13-root-repeat-v1.log, analog-ibss-root-repeat-v1.log, eoc-source-root-repeat-v1.log, eoc-full-status-root-repeat-v1.log. No device access, physical protection/retention certification or normal feature activation follows.
+
+## Resolved boot prerequisite identity — 14 October 2026
+
+The previously mocked prerequisite before the direct PMU-table loop is
+`nand_boot_init()`. Its actual literal loads identify the start/result logs
+and NAND boot tag. This resolves the function's identity; it does not identify
+an analog charger initializer or prove all transitive callees are PMU-free.
+
+| Binding | 12H321 iBEC | 13G36 iBoot |
+| --- | --- | --- |
+| Prerequisite entry | `9ff11d44` | `9ff12a54` |
+| Factory call | `9ff11e16 -> 9ff0d0a0` | `9ff12b28 -> 9ff0dc58` |
+| Object-init call through context+320 | `9ff11e26` | `9ff12b38` |
+| Published object's init target | `9ff0e808` | `9ff0e480` |
+
+The 13G36 input here is **iBoot**, SHA256
+`7dc177231f52e7032cd10ddb255c3a8fd6f62c33c5e4d731eda7e5e0a8b8fdcd`;
+the 12H321 iBEC hash is listed above. These addresses must not be reused for
+13G36 iBEC. Both factories identify themselves as `nand_part_init` and
+`nand_part_core`, allocate an object of size 0x9ac, set object[0] to self,
+store the boot context at +44, and publish the object through context+320.
+The consumer loads the object's first two words as self and callback, then
+calls the callback at object+4. A C++ vtable dispatch is not assumed.
+
+The full prerequisite bodies and factory/store/consumer relationships were
+inspected statically. Original-image hashes and all recorded literal values
+and strings were independently checked. No old emulation group was rerun;
+no new hardware or PMU access followed. This closes the earlier unnamed-call
+gap while leaving the concrete blocker intact: authenticated meanings of
+analog/OTP/default fields, checked initialization completion, and retention
+through the final boot handoff. The adjacent raw d0/ef/ee table writes do not
+gain CV, termination, OTP or NAND semantics from this identity.
