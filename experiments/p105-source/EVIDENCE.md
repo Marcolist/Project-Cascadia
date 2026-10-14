@@ -69,8 +69,11 @@ and module references. It does not borrow a class-device context or manually
 remove a managed link. Validation is nonblocking: controller and observer locks
 use trylock; contention denies validity.
 
-The separately reviewed HDQ-v3 implementation is copied byte-for-byte as
-`apple-hdq-battery.c` (SHA256 `c2177dda1c9b877c7660468679e207f05c39588b66f5ce089b507e67c998995c`).
+The separately reviewed HDQ-v3 implementation began as a byte-identical copy
+(SHA256 `c2177dda1c9b877c7660468679e207f05c39588b66f5ce089b507e67c998995c`).
+The current `apple-hdq-battery.c` retains its snapshot/lifetime implementation
+and adds the reviewed transport/PRESENT fixes described below; its current hash
+is recorded separately in `source-provenance.json`.
 Its opaque reader owns a managed link to the actual gauge platform supplier,
 module/device/supply references, and a bounded atomic cache publication. Its
 sample is a sequential read interval, not simultaneous measurements. A successful
@@ -111,13 +114,13 @@ unbind is visible, but do not claim a general lock-free teardown proof.
 
 ## Tests and real ARM compilation
 
-Run `python3 test-combined-private.py -v` here. The file uses local candidate C,
-the local byte-identical HDQ-v3 copy, and the actual original libcomposite
+From the repository root, run `python3 tests/test-experimental-source-provider.py -v`.
+The file uses local candidate C, the local HDQ snapshot driver, and the actual original libcomposite
 `set_config()` body. `CASCADIA_TEST_LINUX` can select the original Linux tree;
 `CASCADIA_TEST_HDQ_READER` can select the exported HDQ-v3 source. Missing source or
 GCC explicitly skips. There are no Apple firmware bytes or firmware prerequisites.
 
-Five test groups PASS under GCC `-Wall -Wextra -Werror` with ASan/UBSan:
+Six test groups PASS under GCC `-Wall -Wextra -Werror` with ASan/UBSan:
 
 1. Actual set_config/observer/source-reader path: missing status completion,
    successful 500 mA, current zero-descriptor configuration, 2100-request USB2
@@ -132,6 +135,8 @@ Five test groups PASS under GCC `-Wall -Wextra -Werror` with ASan/UBSan:
    API; the only transport fake returns explicitly enumerated gauge bytes.
 5. Immediate UART errno, partial-burst publication rejection, source disconnect
    during the actual gauge burst, untouched output on failure and gauge suspend.
+6. PRESENT returns the actual transport errno and preserves caller output on
+   initial/expired-cache failure, invalidates the generation and releases the lock.
 
 `arm-source-combined-complete.log` records actual ARMv7 object builds against
 real 6.12 headers in the separate complete `../observer-arm-linux` copy:
@@ -177,3 +182,73 @@ DWC2 tree. The resulting observer C/H must equal the supplied updated versions; 
 Owned source invalidation now reaches the frontend through registered and
 synchronously drained atomic notifiers; see [the concrete path and limits](NOTIFICATIONS.md).
 No PMU I/O occurs in callbacks; physical shutdown deadlines remain unverified.
+
+## Transport synchronization for a usable charging telemetry supplier
+
+The experimental copy previously retained a self-clearing-break assumption,
+accepted damaged command echoes, and converted a PRESENT refresh error to
+successful absence. These were already corrected separately in the normal
+transport review (#15, #18 and #12), but the future charging supplier uses this
+independent copy. It now drives 200 us low, explicitly clears the break, polls
+with the pinned Linux microsecond macro, waits 40 us recovery, and rejects a
+damaged first-eight-byte command echo before accepting response data. PRESENT
+propagates a read failure rather than publishing absence. Read-only command
+bounds, high-low-high word coherence, generation invalidation, lifetime,
+suspend/resume and complete-cache publication are retained.
+
+Additional offline checks from the repository root:
+
+```sh
+python3 tests/test-experimental-source-hdq-explicit-break.py -v
+python3 tests/test-experimental-source-hdq-command-echo.py -v
+CASCADIA_HDQ_SOURCE=experiments/p105-source/apple-hdq-battery.c python3 tests/test-hdq-word-coherence.py -v
+python3 tests/test-experimental-source-provider.py -v
+python3 tests/test-experimental-source-notify.py -v
+```
+
+The break/echo fixtures reuse the separately reviewed controls with the
+experimental source selected by default and the same licensed/hash-pinned Linux
+v6.12 polling macro fixture. They use explicit fake time/UART and no hardware.
+The echo group also rejects every non-read command before any UART write.
+The provider fixture still executes actual composite/reader/tuple code, with
+explicit byte-I/O fakes. The five suites pass 25 groups, and historical-code
+controls fail at the intended break, damaged-echo and PRESENT assertions.
+A new invalid-command fixture initially failed in its own setup, which only
+accepts valid read commands; setup was corrected without changing driver code,
+and the complete five-group echo suite then passed. Successful unrelated groups
+were retained rather than repeatedly rerun.
+
+A complete ARM module compile/modpost/link against the frozen 6.12 headers
+passes W=1/Werror without warnings, under two CPUs/1 GiB in an unprivileged,
+network-disabled container with original kernel sources read-only. Normal
+sources, Kconfig defaults and the sealed RAM candidate remain unchanged. This
+makes the prepared gauge supplier consistent with the reviewed transport; it
+does not supply source-current permission, analog CV/termination/fault setup,
+or evidence that this experiment can charge the tablet.
+
+### Bounded live gauge/API validation (2026-10-14)
+
+After source review, the corrected experimental driver was compiled against the
+already running frozen kernel. The private validation copy differs only in its
+unique platform-driver name; the reviewed echo driver remained loaded. A RAM
+rollback script was prepared before binding the temporary driver. A separate
+one-shot platform consumer acquired the real reader during its driver-core
+probe, obtained one complete sequential sample, checked immediate validity,
+waited 1.1 seconds and checked rejection of the expired sample. It closed the
+reader and removed its own device/driver before returning; its module was then
+unloaded before restoring the supplier, including the symbol-dependency reference.
+
+The one-shot API test passed on the iPad: 3.814 V, -249 mA, 29.6 C and a
+146.61 ms sequential sampling interval. Three subsequent sysfs observations,
+more than five seconds apart, succeeded with capacity51%, present1,29.6 C,
+3.814..3.815 V and -249..-250 mA. Xorg PID and dimmed brightness stayed unchanged.
+The rollback then restored the prior echo driver successfully and unloaded the
+temporary supplier. No charger/PMU operation, USB change, NAND operation or new
+boot was performed. The sealed RAM candidate was not changed or booted.
+
+This is actual gauge supplier/API validation of the specific private module
+copy, not a full PR-head boot, proof of simultaneous measurements or physical
+charging. Rejection occurred after the timestamp deadline; concurrent refresh
+can also invalidate an old generation, so expiry is not claimed as its sole
+possible invalidation cause. No charge-current actuator or combined USB provider
+was installed. The input budget and analog safety prerequisites remain open.

@@ -87,6 +87,19 @@ struct device_link {enum device_link_state status;struct device *supplier;};
 #define dev_is_platform(d) ((d)->platform)
 struct power_supply_desc {const char *name;};
 struct power_supply {struct {struct device *parent;}dev;const struct power_supply_desc *desc;void *data;};
+union power_supply_propval { int intval; };
+enum power_supply_property {
+ POWER_SUPPLY_PROP_TECHNOLOGY, POWER_SUPPLY_PROP_PRESENT,
+ POWER_SUPPLY_PROP_STATUS, POWER_SUPPLY_PROP_CAPACITY,
+ POWER_SUPPLY_PROP_VOLTAGE_NOW, POWER_SUPPLY_PROP_CURRENT_NOW,
+ POWER_SUPPLY_PROP_TEMP, POWER_SUPPLY_PROP_CHARGE_NOW,
+ POWER_SUPPLY_PROP_CHARGE_FULL, POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN,
+ POWER_SUPPLY_PROP_CYCLE_COUNT
+};
+enum { POWER_SUPPLY_TECHNOLOGY_LIPO, POWER_SUPPLY_STATUS_FULL,
+ POWER_SUPPLY_STATUS_CHARGING, POWER_SUPPLY_STATUS_DISCHARGING,
+ POWER_SUPPLY_STATUS_NOT_CHARGING };
+
 static struct device consumer,source_device,gauge_device;
 static struct device_link source_link,gauge_link;
 static struct platform_driver hdq_driver,dwc2_platform_driver;
@@ -189,7 +202,7 @@ static int fake_read8(struct hdq_battery *b,u8 reg){
 }
 #define hdq_read8 fake_read8
 '''
-        for name in ['hdq_read16', 'hdq_invalidate_locked', 'hdq_refresh_locked', 'hdq_get_snapshot', 'hdq_snapshot_valid']:
+        for name in ['hdq_read16', 'hdq_invalidate_locked', 'hdq_refresh_locked', 'hdq_refresh', 'hdq_get_property', 'hdq_get_snapshot', 'hdq_snapshot_valid']:
             c += function(src, name) + '\n'
         c += '#undef hdq_read8\n'
         a = src.index('struct apple_hdq_reader {')
@@ -309,8 +322,25 @@ static void transport_tests(void){
  assert(ops->snapshot(ops->context,NULL,&psy,&s)==-EHOSTDOWN&&!memcmp(&old,&s,sizeof(s)));
  p105_combined_provider_close(p);puts("transport/partial burst/source changed/output retention fixtures PASS");
 }
+
+static void present_tests(void){
+ init(); union power_supply_propval value={.intval=0x123456};
+ fail_byte=1;
+ assert(hdq_get_property(&psy,POWER_SUPPLY_PROP_PRESENT,&value)==-ETIMEDOUT);
+ assert(value.intval==0x123456&&!gauge.lock.locked&&!gauge.valid);
+ fail_byte=0;
+ assert(!hdq_get_property(&psy,POWER_SUPPLY_PROP_PRESENT,&value));
+ assert(value.intval==1&&gauge.valid&&!gauge.lock.locked);
+ u64 generation=gauge.generation;
+ now_ns+=6*NSEC_PER_SEC;jiffies=now_ns/(NSEC_PER_SEC/HZ);
+ fail_byte=byte_reads+2;value.intval=0x654321;
+ assert(hdq_get_property(&psy,POWER_SUPPLY_PROP_PRESENT,&value)==-ETIMEDOUT);
+ assert(value.intval==0x654321&&!gauge.lock.locked&&!gauge.valid&&gauge.generation>generation);
+ puts("PRESENT errno/output retention/invalidation fixtures PASS");
+}
+
 int main(int argc,char **argv){assert(argc==2);
- if(!strcmp(argv[1],"source"))source_tests();else if(!strcmp(argv[1],"invalidate"))invalidation_tests();else if(!strcmp(argv[1],"lifetime"))lifecycle_tests();else if(!strcmp(argv[1],"combined"))combined_tests();else transport_tests();
+ if(!strcmp(argv[1],"present"))present_tests();else if(!strcmp(argv[1],"source"))source_tests();else if(!strcmp(argv[1],"invalidate"))invalidation_tests();else if(!strcmp(argv[1],"lifetime"))lifecycle_tests();else if(!strcmp(argv[1],"combined"))combined_tests();else transport_tests();
  assert(!allocs&&!module_refs&&!supply_refs&&!consumer.refs&&!source_device.refs&&!gauge_device.refs);
 }
 '''
@@ -332,5 +362,6 @@ int main(int argc,char **argv){assert(argc==2);
     def test_actual_managed_handle_unwind_and_fence(self): self.run_fixture('lifetime')
     def test_actual_combined_source_and_hdq_tuple(self): self.run_fixture('combined')
     def test_actual_transport_errors_and_source_change(self): self.run_fixture('transport')
+    def test_present_preserves_transport_errno_and_caller_output(self): self.run_fixture('present')
 
 if __name__ == '__main__': unittest.main()
