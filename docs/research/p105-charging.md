@@ -566,3 +566,34 @@ No firmware bytes, profile tables, credentials or private test artifacts are
 published. No new boot, PMU write or charger enable was performed for this
 source follow-up. The running gauge/session and the inactive charger
 experiments remain unchanged.
+
+### Paired early boot stages
+
+The matching 10A406 iBoot and LLB components were subsequently acquired from
+the same official archive: only 430,171 compressed-member/header bytes, with
+exact HTTP range/ETag, Deflate length and ZIP CRC checks. Both identify
+iBoot1537.4.19; their native relocation entries independently establish their
+different software bases. Decrypted component SHA256 values are:
+
+- iBoot: `5e48cf1c3a6a666b9297e8c1d8cc06e7cf0a356e0e502c2a0002049ea900e9f3`.
+- LLB: `c215fbe488f446691eac90205095bcff3f9f20aa04029188b84208638fe93b90`.
+
+LLB startup call `0x34013d0e` reaches a real PMU initializer at
+`0x3400aca0..0x3400af7c`: four table loops contain 10/36/14/8 records, alongside
+a revision-conditional bank sequence and further control operations. These
+match the previously examined later initialization family. Neither record-loop
+callers nor the byte helper establish checked transport completion; the
+initializer returns literal zero. Its opaque register/value records still
+lack a named CV/termination/protection and reset-retention contract. A zero
+initializer return therefore cannot qualify analog retention for Linux.
+
+Seven specifically identified additional raw-write callsites address a
+different I2C client (`0x34` encoded, versus D1946 `0x78`), with actual
+source-classifier/accessory-response/precharge callers. One helper also invokes
+the real PMU LDO-index path, traced to register `0x21`, mask `0x04`; these paths
+are not generally PMU-free. They provide no new CV identity or electrical
+power permission. This bounded caller closure does not exclude unknown dynamic
+dispatch or other firmware paths. No further duplicate emulation suites or
+hardware operations were performed. The remaining requirement is field
+semantics and checked ownership of the identified initialization records, not
+another numerical match to an opaque table.
