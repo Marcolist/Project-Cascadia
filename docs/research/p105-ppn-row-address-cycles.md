@@ -46,7 +46,7 @@ mock or MMIO was involved. This proves the selection, not the unit's ID.
 
 The width is consumed by an actual read command, not just stored unused:
 
-- The direct 12H321 reader loads `0A` and `37` at `9ff0790c..790e`, loads
+- The direct 12H321 bootpage reader loads `0A` and `37` at `9ff0790c..790e`, loads
   `PPN+260` at `9ff07910`, and passes it to the command/address helper at
   `9ff07914..7918`.
 - The normal sequential read function loads `PPN+260`, subtracts one and
@@ -90,3 +90,40 @@ partitioning and Linux filesystem installation remain excluded.
 The late transport-error fixes in #9 and unknown-status handling in #13
 remain independent. This count-only patch must retain those corrections when
 combined; it does not replace them.
+
+## Further qualification of the observed status
+
+The same two hash-pinned iBEC images independently name the direct function
+`h2fmi_ppn_read_bootpage`. In this operation, a successfully obtained status
+of `0x50` takes the bit-4 error branch, whose literal is
+"General Error bit asserted during Read Boot Page". It loads internal result
+`0x80000020`, rather than accepting the page or retrying the read command.
+
+| Step | 12H321 iBEC | 13G36 iBEC |
+| --- | --- | --- |
+| Function entry | `9ff078d0` | `9ff07ce4` |
+| Exact-success / bit-4 tests | `9ff0792c` / `9ff07930` | `9ff07d52` / `9ff07d56` |
+| Error log / result load | `9ff0793e` / `9ff07942` | `9ff07d94` / `9ff07d98` |
+| Error string | `9ff3658e` | `9ff39b51` |
+
+The subsequent three-step data copy advances its destination, without issuing
+another page-read or returning to the status decision. It preserves the saved
+error if data transfer succeeds; a later transfer failure can replace it with
+`0x80000022`. The extra ECC check is reached only for the success result, so
+this source does not identify the general error as a physical ECC failure.
+
+An additional offline check executes only the original branch-selection
+instructions: all 256 status bytes with synthetic status-reader return 0/1 in
+each image (1024 cases), plus four nonzero-return controls. Execution stops
+before logs, helpers or the common result path. Only image RAM and a synthetic
+stack are mapped; there are no helper replacements, NAND or MMIO mappings.
+The final error constants and preservation path above are separately checked
+statically, not claimed as a complete emulated read.
+
+This is operation-specific evidence. For example, `0x42` enters this bootpage
+path's other-error branch, although the Linux normal reader labels it REFRESH.
+Neither the branch replay nor the repeated numeric value `0x50` in a controller
+control-word write justifies changing Linux's accepted statuses. The connected
+unit's physical fault cause, protocol profile and suitable recovery remain
+unidentified. No new read or reset was attempted, and this documentation update
+changes neither the candidate code nor any recorded ARM artifact.
