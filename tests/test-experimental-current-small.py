@@ -53,6 +53,7 @@ struct d1946_current {
 static unsigned int schedules,pending,snapshots,changes;static int provider_error;
 static void *system_wq;
 static void mod_delayed_work(void *wq,struct delayed_work *w,unsigned long delay){(void)wq;(void)delay;assert(w->work.marker==123);schedules++;pending=1;}
+static bool queue_delayed_work(void *wq,struct delayed_work *w,unsigned long delay){if(pending)return false;mod_delayed_work(wq,w,delay);return true;}
 static unsigned long msecs_to_jiffies(unsigned int t){return t;}
 static u64 ktime_get_ns(void){return NSEC_PER_SEC;}
 static int failed_snapshot(void *ctx,struct power_supply *i,struct power_supply *b,struct d1946_snapshot *s){(void)ctx;(void)i;(void)b;(void)s;snapshots++;return provider_error;}

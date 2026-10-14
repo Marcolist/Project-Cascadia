@@ -102,8 +102,14 @@ static void d_queue(struct d1946_current *d, unsigned long delay,
 	spin_lock_irqsave(&d->queue_lock, flags);
 	if (READ_ONCE(d->ready) && READ_ONCE(d->events_enabled) &&
 	    !READ_ONCE(d->stopping) &&
-	    (allow_fault || !READ_ONCE(d->fault_latched)))
-		mod_delayed_work(system_wq, &d->work, delay);
+	    (allow_fault || !READ_ONCE(d->fault_latched))) {
+		/* A periodic self-requeue must not postpone an already pending
+		 * source event. Urgent work may still advance a pending poll. */
+		if (delay)
+			queue_delayed_work(system_wq, &d->work, delay);
+		else
+			mod_delayed_work(system_wq, &d->work, 0);
+	}
 	spin_unlock_irqrestore(&d->queue_lock, flags);
 }
 static void d_invalidate(struct d1946_current *d)

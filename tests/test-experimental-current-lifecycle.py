@@ -90,9 +90,15 @@ static atomic_bool stop_started,stop_done;
 static void *system_wq;
 static void mod_delayed_work(void *wq,int *w,unsigned long delay){
  (void)wq;(void)delay;assert(*w==123);pthread_mutex_lock(&gate);
- scheduled++;pending++;queue_entered=true;pthread_cond_broadcast(&cond);
+ scheduled++;pending=1;queue_entered=true;pthread_cond_broadcast(&cond);
  while(queue_block&&!queue_release)pthread_cond_wait(&cond,&gate);
  pthread_mutex_unlock(&gate);
+}
+/* Preserve pending work without delaying it, as queue_delayed_work does. */
+static bool queue_delayed_work(void *wq,int *w,unsigned long delay){
+ (void)wq;(void)delay;assert(*w==123);pthread_mutex_lock(&gate);
+ bool queued=!pending;if(queued){scheduled++;pending=1;}
+ pthread_mutex_unlock(&gate);return queued;
 }
 static void cancel_delayed_work_sync(int *w){
  assert(*w==123);pthread_mutex_lock(&gate);pending=0;cancels++;cancel_seq=++sequence;pthread_mutex_unlock(&gate);

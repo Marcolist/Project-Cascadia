@@ -70,7 +70,8 @@ struct d1946_current {spinlock_t queue_lock;struct mutex lifecycle_lock,io_lock;
 static unsigned int mod_calls,cancel_calls,inhibit_calls,disable_calls,sync_calls;
 static int io_error;
 static void *system_wq;
-static void mod_delayed_work(void *wq,struct delayed_work *w,unsigned long delay){(void)wq;(void)delay;assert(spin_depth);w->queued++;mod_calls++;}
+static void mod_delayed_work(void *wq,struct delayed_work *w,unsigned long delay){(void)wq;(void)delay;assert(spin_depth);w->queued=1;mod_calls++;}
+static bool queue_delayed_work(void *wq,struct delayed_work *w,unsigned long delay){if(w->queued)return false;mod_delayed_work(wq,w,delay);return true;}
 static void cancel_delayed_work_sync(struct delayed_work *w){assert(!spin_depth);assert(active_front->stopping&&!active_front->ready&&!active_front->owned_provider->subscription);w->queued=0;cancel_calls++;}
 static void disable_irq(int irq){assert(irq==19&&!spin_depth);disable_calls++;}
 static void synchronize_irq(int irq){assert(irq==19&&!spin_depth);sync_calls++;}

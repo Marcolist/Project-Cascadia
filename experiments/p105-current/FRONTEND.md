@@ -331,3 +331,39 @@ and symbol exports remain byte-identical. Runtime bools remain false. Separately
 [disabled device-tree wiring](DT_WIRING.md) now describes the existing PMU IRQ,
 battery and USB connections for an offline test candidate; it is not embedded
 in this kernel or included by the normal build. No module or DT was transferred.
+
+
+## Preserve an urgent event across periodic worker rearm
+
+After successful publication and release of `io_lock`, a PMU parent event can
+run `d_parent -> d_event -> d_invalidate`, advance the epoch and queue immediate
+work. The previous worker then called `mod_delayed_work(...,100ms)` and moved
+that already pending event response back to its polling deadline. The same
+ordering can affect owned source notifications. This was a scheduling defect;
+it did not establish an electrical cutoff deadline or new analog semantics.
+
+`d_queue` retains its stop/ready/events/fault checks and `queue_lock`. Nonzero
+periodic delays now use `queue_delayed_work`, which leaves pending work at its
+existing deadline. Zero-delay urgent requests retain `mod_delayed_work`, so an
+urgent event can still advance a queued poll. Linux6.12 clears a running work
+item's PENDING bit before invoking its function, so an executing worker with no
+pending follow-up can still queue its next regular poll.
+
+`tests/test-experimental-current-urgent-queue.py` runs actual parent dispatch,
+source invalidation and worker bodies with actual hash-pinned Linux6.12
+`queue_delayed_work_on`/`mod_delayed_work_on` decision functions. The lower
+PENDING/IRQ/timer machinery, time, PMU and supplier are explicit deterministic
+fakes. It covers event-before-poll, poll-before-event, regular executing-worker
+self-requeue, an earlier pending poll, stop/ready/events/fault gates, and parent
+read failure through bounded inhibit. The exact old queue helper fails the
+same event-before-poll check with next_delay100 instead of0. Six positive cases
+and the historical negative control pass under ASan/UBSan/Werror. The five
+existing extractors of `d_queue` have PENDING-preserving queue shims; their
+retained assertions and old bug controls remain enabled. No actual workqueue
+scheduling latency or physical charging behavior is measured.
+
+Incremental ARM current-module MODPOST/final link passes with zero warnings.
+The previously linked kernel, provider module, configuration and exports remain
+byte-identical; all runtime opt-ins stay off. No device access, module load or
+boot occurred. Run the focused test with `CASCADIA_TEST_LINUX` pointing to the
+existing pinned Linux 6.12 tree; a missing compiler/tree is a skip, not a pass.

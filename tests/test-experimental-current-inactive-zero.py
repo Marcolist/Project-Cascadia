@@ -42,8 +42,9 @@ struct d1946_current{
  struct delayed_work work;int parent_irq,virq[3];u8 ceiling,status[6];u64 status_time_ns;
  struct d1946_io io;struct power_supply*input,*battery,*psy;const struct d1946_current_provider*provider;
 };
-static unsigned int queued,enabled,snapshots;static void*system_wq;
-static void mod_delayed_work(void*wq,struct delayed_work*w,unsigned long delay){(void)wq;(void)w;(void)delay;++queued;}
+static unsigned int queued,enabled,snapshots;static bool pending;static void*system_wq;
+static void mod_delayed_work(void*wq,struct delayed_work*w,unsigned long delay){(void)wq;(void)w;(void)delay;++queued;pending=true;}
+static bool queue_delayed_work(void*wq,struct delayed_work*w,unsigned long delay){if(pending)return false;mod_delayed_work(wq,w,delay);return true;}
 static void enable_irq(int irq){(void)irq;++enabled;}
 static const unsigned int source_events[]={3,4,52};
 static u64 ktime_get_ns(void){return NSEC_PER_SEC;}static unsigned long msecs_to_jiffies(unsigned int t){return t;}
@@ -55,7 +56,7 @@ static bool owned_usb2_source,allow_usb2_current;
 static int d_read(void*ctx,unsigned int reg,u8*out,unsigned int n){struct d1946_current*d=ctx;return d->io.read(d->io.context,reg,out,n);}
 '''
 SUFFIX=r'''
-static void init(struct d1946_current*d,struct fake*f){memset(d,0,sizeof(*d));setup(f,0xbf);d->ready=true;d->ceiling=63;d->provider=&provider;d->io=(struct d1946_io){f,read_fake,write_fake};queued=enabled=snapshots=0;}
+static void init(struct d1946_current*d,struct fake*f){memset(d,0,sizeof(*d));setup(f,0xbf);d->ready=true;d->ceiling=63;d->provider=&provider;d->io=(struct d1946_io){f,read_fake,write_fake};queued=enabled=snapshots=0;pending=false;}
 int main(int argc,char**argv){
  assert(argc==2);struct d1946_current d;struct fake f;struct power_supply p={&d};union power_supply_propval v={0};
  if(!strcmp(argv[1],"inactive")){
