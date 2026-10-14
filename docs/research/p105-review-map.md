@@ -20,6 +20,10 @@ Raw-tool refusal prevents a specific conflicting access path; it is not a
 positive exclusive controller/DMA lease. MTD geometry is still hardcoded.
 Battery reads and USB error handling do not prove charging or external host mode.
 
+For the live desktop, [touch registration and gesture discovery](p105-desktop-touch-observation.md)
+separates Xorg's input path, Touchégg's initial event queue and incorrect physical
+size metadata. Those source observations are not a physical touch qualification.
+
 ## Optional faults corrected during the follow-up review
 
 These components remain uninstalled. Each linked test executes actual source
