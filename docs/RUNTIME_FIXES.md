@@ -79,3 +79,28 @@ unchanged. No failed attempt is counted as a PASS.
 Existing source comments refer to the separate
 [USB research notes](https://github.com/Marcolist/Project-Cascadia/blob/research/p105-power-storage-usb/docs/research/p105-usb-host.md);
 those experiments are not included in this extraction.
+
+## USB PMGR ON acknowledgement
+
+The gate helper requested state `0xf`, but accepted any equal request/status
+nibbles. A readback of `0x00` (including an unresponsive register that reads
+zero) or `0x44` could therefore report success and allow OTG PHY reset writes
+although the requested ON state was not observed. This is a reproducible
+software defect; neither readback has been observed as the cause of a failure
+on our device.
+
+The helper now requires both nibbles to equal the requested ON value `0xf`.
+The existing gate request, preserved upper bits, 1,000-poll bound and error
+propagation remain unchanged. No rollback, power-source policy or new register
+write is added. EHCI/OHCI use the same helper and retain their existing error
+cleanup. This does not qualify external USB host mode or Lightning VBUS.
+
+The actual-C regression covers all 256 request/status pairs, acknowledgement
+at the last allowed poll, and acknowledgement beyond the deadline. A temporary
+copy restoring only the old predicate reproduces `status=0x00`, return zero
+and two PHY reset writes; the new predicate times out before reset instead.
+The full focused entrypoint passes six tests: 282 positive-contract cases and
+two historical negative controls, compiled with UBSan and strict warnings.
+The changed driver also builds and links as an ARM module against the prepared
+Linux 6.12 tree, with no warnings, in an isolated two-CPU/1-GiB container.
+The module was not loaded and no new kernel image was booted.

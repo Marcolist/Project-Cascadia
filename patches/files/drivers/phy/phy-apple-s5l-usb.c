@@ -128,7 +128,9 @@ static int s5l_pmgr_on(struct s5l_usbphy *p, u32 off)
 	writel((v & ~0x10f) | PMGR_GATE_ON, p->pmgr + off);
 	for (n = 0; n < 1000; n++) {
 		v = readl(p->pmgr + off);
-		if (!((v ^ (v >> 4)) & 0xf))
+		/* Matching OFF or intermediate nibbles do not acknowledge ON. */
+		if ((v & 0xf) == PMGR_GATE_ON &&
+		    ((v >> 4) & 0xf) == PMGR_GATE_ON)
 			return 0;
 		udelay(1);
 	}
