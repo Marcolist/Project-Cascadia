@@ -123,7 +123,7 @@ static void init(struct d1946_current *d,struct fake *f){
  d->requested_input=500;d->requested_charge=480;d->work.work.marker=123;
  static struct power_supply psy;d->psy=&psy;
  positive_sample=(struct d1946_snapshot){.generation=1,.sampled_ns=NSEC_PER_SEC-1,.valid_until_ns=NSEC_PER_SEC+1000,.online=1,.budget_ua=500000,.present=1,.voltage_uv=3900000,.temp_decic=250};
- f->regs[0x0a]=8;memset(f->regs+0x0b,0,5);memset(f->regs+1,0,9);
+ f->regs[0x40]=0x40;f->regs[0x0a]=8;memset(f->regs+0x0b,0,5);memset(f->regs+1,0,9);
  owned_usb2_source=allow_usb2_current=true;provider_error=0;
  validity_calls=deny_at=invalidate_at=0;inject_epoch=validator_revoked=inject_parent=false;
  schedules=pending=snapshots=changes=parents=children=disables=queue_calls=mod_calls=0;

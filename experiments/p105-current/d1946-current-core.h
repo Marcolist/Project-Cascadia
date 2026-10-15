@@ -20,6 +20,7 @@ int d1946_update_checked(const struct d1946_io *, unsigned int, u8, u8);
 int d1946_charge_request(unsigned int ma);
 int d1946_current_limit(const struct d1946_io *, unsigned int, u8);
 int d1946_input_limit(const struct d1946_io *, unsigned int);
+int d1946_input_handoff(const struct d1946_io *);
 int d1946_input_profile(unsigned int);
 int d1946_mask_checked(const struct d1946_io *, unsigned int, bool, u8 *);
 #endif

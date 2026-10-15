@@ -80,13 +80,44 @@ int d1946_input_limit(const struct d1946_io *io, unsigned int ma)
 	int code = d1946_input_profile(ma), ret;
 	if (code < 0)
 		return code;
+	/* Program the new limit before releasing either battery suspend control.
+	 * Otherwise a resumed input can briefly use the previous, larger limit.
+	 * Zero keeps the reverse order: suspend first, then clear the limit.
+	 * Caller must already hold checked charge inhibit and a valid source lease.
+	 */
+	if (ma) {
+		ret = d1946_update_checked(io, 0x3d, 0xff, code);
+		if (ret)
+			return ret;
+	}
 	ret = d1946_update_checked(io, 0x1b, 0x04, ma ? 0 : 0x04);
 	if (ret)
 		return ret;
 	ret = d1946_update_checked(io, 0x1c, 0x80, ma ? 0 : 0x80);
 	if (ret)
 		return ret;
-	return d1946_update_checked(io, 0x3d, 0xff, code);
+	return ma ? 0 : d1946_update_checked(io, 0x3d, 0xff, 0);
+}
+
+/* These controls are distinct from the two battery suspend controls above.
+ * A programmed ISET is not effective while alternate USB limiting is selected
+ * or bus power is suspended. Do not repair an unknown inherited mode here.
+ * No event registers, selector writes or charge-control writes in this helper;
+ * caller supplies the checked bank-zero transport and handles failure.
+ */
+int d1946_input_handoff(const struct d1946_io *io)
+{
+	u8 mode, system;
+	int ret;
+	if (!io || !io->read)
+		return -EINVAL;
+	ret = io->read(io->context, 0x40, &mode, 1);
+	if (ret)
+		return ret;
+	ret = io->read(io->context, 0x1b, &system, 1);
+	if (ret)
+		return ret;
+	return (mode & 0x40) && !(system & 0x40) ? 0 : -EIO;
 }
 
 int d1946_mask_checked(const struct d1946_io *io, unsigned int event,

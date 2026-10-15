@@ -357,6 +357,18 @@ static void d_worker(struct work_struct *work)
 		input = d_profile_floor(min_t(unsigned int, maximum, 2100));
 		charge = d_charge_for_input(d, input, snapshot.budget_ua);
 	}
+	/* A checked ISET readback alone does not establish that hardware uses it.
+	 * Check inherited input mode even for an unchanged positive plan, before
+	 * the fast path can publish it again. Zero/fault inhibit needs no grant.
+	 * Subsequent source/epoch checks still fence all positive programming.
+	 */
+	if (input) {
+		ret = d1946_input_handoff(&d->io);
+		if (ret) {
+			d_fault(d);
+			goto fault;
+		}
+	}
 	/* A validator can return its previous result after a concurrent source
 	 * callback advances the frontend epoch. Recheck epoch after each grant
 	 * validation below; this does not make bus I/O atomic with revocation. */

@@ -55,7 +55,8 @@ static void *system_wq;
 static void mod_delayed_work(void *wq,struct delayed_work *w,unsigned long delay){(void)wq;(void)delay;assert(w->work.marker==123);schedules++;pending=1;}
 static bool queue_delayed_work(void *wq,struct delayed_work *w,unsigned long delay){if(pending)return false;mod_delayed_work(wq,w,delay);return true;}
 static unsigned long msecs_to_jiffies(unsigned int t){return t;}
-static u64 ktime_get_ns(void){return NSEC_PER_SEC;}
+static u64 now_ns=NSEC_PER_SEC;
+static u64 ktime_get_ns(void){return now_ns;}
 static int failed_snapshot(void *ctx,struct power_supply *i,struct power_supply *b,struct d1946_snapshot *s){(void)ctx;(void)i;(void)b;(void)s;snapshots++;return provider_error;}
 static bool denied_valid(void *c,const struct d1946_snapshot *s){(void)c;(void)s;return false;}
 static bool owned_usb2_source,allow_usb2_current;
@@ -65,6 +66,16 @@ static bool validator_revoked;
 static unsigned int input_program_writes,stale_input_program_writes,inhibit_writes;
 static struct d1946_current *active;
 static bool inject_epoch;
+static unsigned int handoff_reads, handoff_invalidate_reg, handoff_expire_reg;
+static bool handoff_revoked;
+static int explicit_read(void *ctx,unsigned int reg,u8 *out,unsigned int n){
+ int ret=read_fake(ctx,reg,out,n);
+ if(reg==0x40&&n==1)handoff_reads++;
+ if(!ret&&n==1&&handoff_expire_reg==reg)now_ns+=2000;
+ if(!ret&&n==1&&handoff_invalidate_reg==reg&&!handoff_revoked){
+  handoff_revoked=validator_revoked=true;atomic_inc(&active->epoch);
+ }return ret;
+}
 /* Explicit positive supplier/PMU fakes test only the worker policy; they are not
  * produced USB permission, battery calibration or an analog-retention proof. */
 static int explicit_snapshot(void *ctx,struct power_supply *i,struct power_supply *b,struct d1946_snapshot *s){(void)ctx;(void)i;(void)b;snapshots++;if(provider_error)return provider_error;*s=positive_sample;return 0;}
@@ -127,8 +138,9 @@ static void worker_test(void){
 
 static void make_small(struct d1946_current *d,struct fake *f,unsigned int budget,bool enabled){
  init(d,f);d->provider=&explicit_provider;d->requested_input=500;d->requested_charge=720;d->applied_valid=false;
- d->io.write=explicit_write;active=d;owned_usb2_source=true;allow_usb2_current=enabled;
+ d->io.write=explicit_write;d->io.read=explicit_read;active=d;owned_usb2_source=true;allow_usb2_current=enabled;
  positive_sample=(struct d1946_snapshot){.generation=1,.sampled_ns=NSEC_PER_SEC-1,.valid_until_ns=NSEC_PER_SEC+1000,.online=1,.budget_ua=budget,.present=1,.voltage_uv=3900000,.temp_decic=250};
+ f->regs[0x40]=0x40;handoff_reads=handoff_invalidate_reg=handoff_expire_reg=0;handoff_revoked=false;now_ns=NSEC_PER_SEC;
  provider_error=0;validity_calls=deny_at=invalidate_at=enable_writes=stale_enables=0;input_program_writes=stale_input_program_writes=inhibit_writes=0;inject_epoch=validator_revoked=false;f->regs[0x0a]=8;memset(f->regs+0x0b,0,5);
 }
 static void plans_test(void){
@@ -251,9 +263,67 @@ static void input_revocation_test(const char *phase){
  puts("actual worker input admission/inhibit/zero-plan fixtures PASS");
 }
 
-int main(int argc,char **argv){assert(argc==2);if(!strncmp(argv[1],"input-",6))input_revocation_test(argv[1]);else if(!strncmp(argv[1],"validator-",10))validator_epoch_test(argv[1]);else if(!strcmp(argv[1],"plans"))plans_test();else if(!strcmp(argv[1],"stale"))stale_test();else if(!strcmp(argv[1],"health"))health_test();else if(!strcmp(argv[1],"errors"))failures_test();else if(!strcmp(argv[1],"fault"))fault_test();else worker_test();}
+
+/* PMU register bytes and source grants here are explicit test fixtures only. */
+static void handoff_test(const char *phase){
+ struct d1946_current d;struct fake f;
+ if(!strcmp(phase,"handoff-modes")||!strcmp(phase,"handoff-modes-fast")){
+  for(unsigned int fast=!strcmp(phase,"handoff-modes-fast");fast<=1;fast++)for(unsigned int mode=0;mode<3;mode++){
+   make_small(&d,&f,500000,true);
+   if(fast){d.applied_valid=true;d.applied_epoch=0;d.applied_input=500;d.applied_charge=480;}
+   if(mode!=1)f.regs[0x40]=0;
+   if(mode!=0)f.regs[0x1b]|=0x40;
+   d_worker(&d.work.work);
+   assert(d.fault_latched&&d.inhibit_attempted&&!d.applied_valid&&!enable_writes&&!input_program_writes&&"handoff_mode_not_rejected");
+   assert(handoff_reads==1&&(f.regs[0x3f]&0x40)&&f.regs[0x3d]==0);
+   /* Validation never repairs the inherited control modes. */
+   assert(f.regs[0x40]==(mode==1?0x40:0));
+   assert(!!(f.regs[0x1b]&0x40)==(mode!=0));
+  }
+ }else if(!strcmp(phase,"handoff-fast")){
+  make_small(&d,&f,500000,true);d.applied_valid=true;d.applied_epoch=0;d.applied_input=500;d.applied_charge=480;
+  d_worker(&d.work.work);
+  assert(d.applied_valid&&!d.fault_latched&&handoff_reads==1&&f.writes==0&&validity_calls==2);
+ }else if(!strcmp(phase,"handoff-zero")){
+  make_small(&d,&f,500000,true);d.requested_input=0;f.regs[0x40]=0;f.regs[0x1b]|=0x40;
+  f.regs[0x1b]&=~4;f.regs[0x1c]&=~0x80;f.regs[0x3d]=34;
+  d_worker(&d.work.work);
+  assert(d.applied_valid&&!d.fault_latched&&!handoff_reads&&(f.regs[0x3f]&0x40));
+  assert(f.regs[0x3d]==0&&(f.regs[0x1b]&4)&&(f.regs[0x1c]&0x80));
+  assert(!f.regs[0x40]&&(f.regs[0x1b]&0x40));
+ }else if(!strcmp(phase,"handoff-expiry")){
+  for(unsigned int fast=0;fast<=1;fast++)for(unsigned int reg=0;reg<2;reg++){
+   make_small(&d,&f,500000,true);d.epoch=7;
+   if(fast){d.applied_valid=true;d.applied_epoch=7;d.applied_input=500;d.applied_charge=480;}
+   handoff_expire_reg=reg?0x1b:0x40;d_worker(&d.work.work);
+   assert(now_ns>positive_sample.valid_until_ns&&!d.applied_valid&&!d.fault_latched);
+   assert((f.regs[0x3f]&0x40)&&!enable_writes&&!input_program_writes&&handoff_reads==1);
+  }
+ }else if(!strcmp(phase,"handoff-epoch")){
+  for(unsigned int fast=0;fast<=1;fast++)for(unsigned int reg=0;reg<2;reg++){
+   make_small(&d,&f,500000,true);d.epoch=7;
+   if(fast){d.applied_valid=true;d.applied_epoch=7;d.applied_input=500;d.applied_charge=480;}
+   handoff_invalidate_reg=reg?0x1b:0x40;
+   d_worker(&d.work.work);
+   assert(handoff_revoked&&d.epoch==8&&!d.applied_valid&&!d.fault_latched);
+   assert((f.regs[0x3f]&0x40)&&!enable_writes&&!stale_input_program_writes);
+   assert(!input_program_writes&&handoff_reads==1);
+  }
+ }else{
+  assert(!strcmp(phase,"handoff-errors"));
+  /* First status read is call1; handoff reads are exactly calls2 and3. */
+  for(unsigned int at=2;at<=3;at++){
+   make_small(&d,&f,500000,true);f.fail_at=at;d_worker(&d.work.work);
+   assert(d.fault_latched&&d.inhibit_attempted&&!d.applied_valid&&!enable_writes&&!input_program_writes);
+   assert((f.regs[0x3f]&0x40)&&f.regs[0x3d]==0);
+  }
+ }
+ puts("actual worker handoff modes/fastpath/zero/epoch/error fixtures PASS");
+}
+
+int main(int argc,char **argv){assert(argc==2);if(!strncmp(argv[1],"handoff-",8))handoff_test(argv[1]);else if(!strncmp(argv[1],"input-",6))input_revocation_test(argv[1]);else if(!strncmp(argv[1],"validator-",10))validator_epoch_test(argv[1]);else if(!strcmp(argv[1],"plans"))plans_test();else if(!strcmp(argv[1],"stale"))stale_test();else if(!strcmp(argv[1],"health"))health_test();else if(!strcmp(argv[1],"errors"))failures_test();else if(!strcmp(argv[1],"fault"))fault_test();else worker_test();}
 '''
-  cls.tmp=tempfile.TemporaryDirectory();p=Path(cls.tmp.name);(p/'test.c').write_text(c);cls.bin=p/'test';cls.old=p/'historical-test';cls.epoch_old=p/'historical-epoch-test';cls.input_old=p/'historical-input-test'
+  cls.tmp=tempfile.TemporaryDirectory();p=Path(cls.tmp.name);(p/'test.c').write_text(c);cls.bin=p/'test';cls.old=p/'historical-test';cls.epoch_old=p/'historical-epoch-test';cls.input_old=p/'historical-input-test';cls.handoff_old=p/'historical-handoff-test'
   old=(ROOT/'historical-d-fault.c').read_text()
   worker_old=(ROOT/'historical-d-worker-prelatched.c').read_text()
   assert hashlib.sha256(worker_old.encode()).hexdigest()=='1d8984f18bd60e886353a3daa78a5e9360cbb395d0ad40dd994011478ffb853a'
@@ -266,11 +336,32 @@ int main(int argc,char **argv){assert(argc==2);if(!strncmp(argv[1],"input-",6))i
   input_old=(ROOT/'historical-d-worker-input-revocation.c').read_text()
   assert hashlib.sha256(input_old.encode()).hexdigest()=='3e5aa9e3f06d16f592de9b2de01f0656c566d33157834ffa4ac6ce3acd48c65d'
   (p/'historical-input.c').write_text(c.replace(function(src,'d_worker'),function(input_old,'d_worker')))
-  for source,target in [('test.c',cls.bin),('historical.c',cls.old),('historical-epoch.c',cls.epoch_old),('historical-input.c',cls.input_old)]:
+  # Remove only this WIP's added handoff block; the recovered body must equal
+  # the pinned actual pre-handoff worker, rather than a guessed substitute.
+  current_worker=function(src,'d_worker')
+  start=current_worker.index('\n\t/* A checked ISET readback')
+  end=current_worker.index('\n\t/* A validator',start)
+  previous_worker=current_worker[:start]+current_worker[end:]
+  assert hashlib.sha256(previous_worker.encode()).hexdigest()=='f2906777f27eb168265852f662463552269212c73c9226f0fb6db2f9cfb12033'
+  (p/'historical-handoff.c').write_text(c.replace(current_worker,previous_worker))
+  for source,target in [('historical-handoff.c',cls.handoff_old),('test.c',cls.bin),('historical.c',cls.old),('historical-epoch.c',cls.epoch_old),('historical-input.c',cls.input_old)]:
    subprocess.run(['gcc',*(['-DCASCADIA_HISTORICAL_EPOCH_WORKER'] if source=='historical-epoch.c' else []),'-DCASCADIA_OFFLINE','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-function','-fsanitize=address,undefined','-fno-sanitize-recover=all','-I',str(ROOT),str(p/source),str(ROOT/'d1946-current-core.c'),'-o',str(target)],check=True)
  @classmethod
  def tearDownClass(cls):cls.tmp.cleanup()
  def run_case(self,name):self.assertIn('fixtures PASS',subprocess.check_output([str(self.bin),name],text=True,timeout=10))
+ def test_actual_handoff_modes_denied_before_fastpath(self):self.run_case('handoff-modes')
+ def test_actual_handoff_good_mode_preserves_fastpath(self):self.run_case('handoff-fast')
+ def test_actual_handoff_zero_does_not_require_mode(self):self.run_case('handoff-zero')
+ def test_actual_handoff_reads_can_expire_lease(self):self.run_case('handoff-expiry')
+ def test_actual_handoff_reads_can_revoke_epoch(self):self.run_case('handoff-epoch')
+ def test_actual_handoff_transport_errors_inhibit(self):self.run_case('handoff-errors')
+ def historical_handoff_case(self,phase):
+  def no_core():resource.setrlimit(resource.RLIMIT_CORE,(0,0))
+  result=subprocess.run([str(self.handoff_old),phase],text=True,capture_output=True,preexec_fn=no_core,timeout=10)
+  self.assertNotEqual(result.returncode,0)
+  self.assertIn('handoff_mode_not_rejected',result.stderr)
+ def test_historical_handoff_missing_mode_not_rejected(self):self.historical_handoff_case('handoff-modes')
+ def test_historical_handoff_fastpath_republishes_missing_mode(self):self.historical_handoff_case('handoff-modes-fast')
  def test_actual_defaultoff_optin_owned_small_profile(self):self.run_case('plans')
  def test_actual_source_stale_and_epoch_race(self):self.run_case('stale')
  def test_actual_thermal_absent_and_status_fault(self):self.run_case('health')

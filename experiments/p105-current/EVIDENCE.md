@@ -1,3 +1,5 @@
+> Current input-handoff validation and transaction-order changes: [INPUT_HANDOFF.md](INPUT_HANDOFF.md). Historical implementation descriptions below predate this delta.
+
 > The exported frontend now includes the owned source/gauge route and queue/IRQ/fault lifetime fixes. See [FRONTEND.md](FRONTEND.md); older staging paths below preserve original current-mask evidence.
 
 > Isolated source experiment. Nothing selects this code in the normal kernel. Hardware behavior has not been tested. Local staging paths below identify the original evidence, not build hooks.
