@@ -188,11 +188,14 @@ static void device_message(struct device *dev, const char *fmt, ...) { (void)dev
 static uint32_t phy_regs[0x1000/4], gate_regs[0x2000/4];
 static unsigned phy_writes, gate_writes, delays[16], delay_count, gate_polls;
 static uint32_t write_values[2], write_offsets[2];
-static bool requested, acknowledge;
+static bool requested, acknowledge, force_readback;
+static uint32_t forced_readback;
+static unsigned acknowledge_after;
 static uint32_t readl(void *address) {
  if (address==&gate_regs[PMGR_USB_OTG/4] && requested) {
   gate_polls++;
-  if (acknowledge) {
+  if (force_readback) return forced_readback;
+  if (acknowledge && gate_polls >= acknowledge_after) {
    uint32_t v=*(uint32_t *)address;
    *(uint32_t *)address=(v & ~0xf0u) | ((v & 0xfu)<<4);
   }
@@ -249,6 +252,61 @@ int main(void) {
         result = self.run_c(harness)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('2 actual initialization cases passed', result.stdout)
+
+    @staticmethod
+    def gate_target_cases():
+        return r'''
+int main(void) {
+ struct device dev={0}; struct s5l_usbphy p={phy_regs,gate_regs,&dev};
+ struct phy phy={&p}; unsigned cases=0;
+ /* Exhaust every requested/actual nibble, including identical OFF/intermediate
+  * states. Equal nibbles are not sufficient: both must indicate ON. */
+ for (unsigned status=0; status<256; status++) {
+  memset(phy_regs,0,sizeof(phy_regs)); memset(gate_regs,0,sizeof(gate_regs));
+  phy_writes=gate_writes=gate_polls=delay_count=0; requested=false;
+  force_readback=true; forced_readback=0xa5000200u | status;
+  phy_regs[ORSTCON/4]=0xa0; gate_regs[PMGR_USB_OTG/4]=0xa5000100;
+  int ret=s5l_usbphy_init(&phy);
+  if (status==0xff) {
+   if (ret || phy_writes!=2 || delay_count!=4) return 41;
+  } else if (ret!=-ETIMEDOUT || phy_writes || delay_count || gate_polls!=1000) {
+   fprintf(stderr,"false gate success: status=0x%02x return=%d PHY writes=%u\n",
+           status,ret,phy_writes);
+   return 42;
+  }
+  assert(gate_writes==1 && gate_regs[PMGR_USB_OTG/4]==0xa500000f);
+  cases++;
+ }
+ /* A late acknowledgement at the final allowed poll succeeds; a later one
+  * times out, without extra writes or a speculative rollback. */
+ for (unsigned at=1000; at<=1001; at++) {
+  phy_writes=gate_writes=gate_polls=delay_count=0; requested=false;
+  force_readback=false; acknowledge=true; acknowledge_after=at;
+  gate_regs[PMGR_USB_OTG/4]=0; phy_regs[ORSTCON/4]=0xa0;
+  int ret=s5l_usbphy_init(&phy);
+  assert(ret==(at==1000 ? 0 : -ETIMEDOUT));
+  assert(phy_writes==(at==1000 ? 2u : 0u) && gate_writes==1);
+  cases++;
+ }
+ printf("PMGR target: %u actual initialization cases passed\n",cases);
+ return 0;
+}
+'''
+
+    def test_pmgr_requires_requested_on_state_before_reset(self):
+        result = self.run_c(self.init_harness(SOURCE.read_text()) + self.gate_target_cases())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('258 actual initialization cases passed', result.stdout)
+
+    def test_legacy_gate_accepts_matching_off_state(self):
+        text = SOURCE.read_text()
+        checked = ('if ((v & 0xf) == PMGR_GATE_ON &&\n'
+                   '\t\t    ((v >> 4) & 0xf) == PMGR_GATE_ON)')
+        self.assertEqual(text.count(checked), 1)
+        text = text.replace(checked, 'if (!((v ^ (v >> 4)) & 0xf))')
+        result = self.run_c(self.init_harness(text) + self.gate_target_cases())
+        self.assertEqual(result.returncode, 42, result.stderr)
+        self.assertIn('status=0x00 return=0 PHY writes=2', result.stderr)
 
     def test_legacy_init_reports_success_and_resets_after_gate_timeout(self):
         text = SOURCE.read_text()
