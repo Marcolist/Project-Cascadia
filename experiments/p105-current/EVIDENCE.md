@@ -50,12 +50,22 @@ unplug event and its delivery to Linux. A fresh unchanged plan does not toggle
 charging during the100ms status poll. Current and status reports are invalidated
 by the generation change. Status has an additional maximum1s software age.
 
-The frontend bounds an experiment to720mA charging and a2.8..4.1V,10..45°C
+The frontend bounds an experiment to720mA charging and a2.8..4.1V,10..40°C
 observation window. These are intentionally restrictive software policy bounds,
 **not** recovered hardware CV/protection thresholds or calibrated measurements.
 The p105 thermal table has10..45°C rows and current ceilings; its4000/4100mV
 columns are current-policy thresholds, not CV targets. No board-data value is
 presented as an absolute battery safety guarantee.
+
+The 17 October correction narrows the frontend's previous 45°C limit to the
+agreed 40°C experimental maximum. At 40.1°C the old worker admitted a positive
+plan and retained an already applied plan. The corrected worker selects zero
+input/current, requests inhibit and clears the input profile. The actual-C
+small-current suite passes 30 tests with ASan/UBSan and Werror, including initial
+admission, active-plan withdrawal, allowed 10/40°C endpoints and denied 9.9,
+40.1, 45/45.1°C cases. Two pinned old-worker controls reproduce the 40.1°C
+failure. A scoped ARM frontend object build passes W=1 without warnings.
+These tests use fake PMU I/O and do not qualify physical thermal cutoff.
 
 ## Central ownership / initialization
 

@@ -185,6 +185,34 @@ static void health_test(void){
  for(unsigned int bit=3;bit<=5;bit++){make_small(&d,&f,500000,true);f.regs[0x0b]=1U<<bit;d_worker(&d.work.work);assert(d.fault_latched&&d.inhibit_attempted&&!d.applied_valid&&(f.regs[0x3f]&0x40));}
  puts("actual worker absent/offline/thermal/statusfault fixtures PASS");
 }
+/* Exercise initial admission and revocation of an actually applied plan.
+ * Register readback is fake I/O, not proof of physical thermal cutoff. */
+static void temperature_test(bool running){
+ const int allowed[]={100,400},denied[]={99,401,450,451};
+ struct d1946_current d;struct fake f;
+ for(unsigned int i=0;i<ARRAY_SIZE(allowed);i++){
+  make_small(&d,&f,500000,true);positive_sample.temp_decic=allowed[i];
+  d_worker(&d.work.work);
+  assert(d.applied_valid&&d.applied_input==500&&d.applied_charge==480);
+  assert(!(f.regs[0x3f]&0x40)&&enable_writes==1);
+ }
+ for(unsigned int i=0;i<ARRAY_SIZE(denied);i++){
+  make_small(&d,&f,500000,true);
+  if(running){
+   positive_sample.temp_decic=400;d_worker(&d.work.work);
+   assert(d.applied_valid&&d.applied_charge==480&&f.regs[0x3d]==34);
+  }
+  unsigned int enables=enable_writes;
+  positive_sample.temp_decic=denied[i];d_worker(&d.work.work);
+  if(d.applied_charge||d.applied_input||!(f.regs[0x3f]&0x40)||f.regs[0x3d])
+   fprintf(stderr,"temperature_limit_not_enforced: running=%u temp_decic=%d input=%u charge=%u\n",running,denied[i],d.applied_input,d.applied_charge);
+  assert(d.applied_valid&&!d.fault_latched&&d.applied_input==0&&d.applied_charge==0);
+  assert((f.regs[0x3f]&0x40)&&f.regs[0x3d]==0);
+  assert((f.regs[0x1b]&4)&&(f.regs[0x1c]&0x80));
+  assert(inhibit_writes>0&&enable_writes==enables);
+ }
+ puts("actual worker 10..40C admission/active revocation fixtures PASS");
+}
 static void failures_test(void){
  struct d1946_current d;struct fake f;make_small(&d,&f,500000,true);d_worker(&d.work.work);unsigned int length=f.calls;
  for(unsigned int at=1;at<=length;at++){
@@ -321,9 +349,9 @@ static void handoff_test(const char *phase){
  puts("actual worker handoff modes/fastpath/zero/epoch/error fixtures PASS");
 }
 
-int main(int argc,char **argv){assert(argc==2);if(!strncmp(argv[1],"handoff-",8))handoff_test(argv[1]);else if(!strncmp(argv[1],"input-",6))input_revocation_test(argv[1]);else if(!strncmp(argv[1],"validator-",10))validator_epoch_test(argv[1]);else if(!strcmp(argv[1],"plans"))plans_test();else if(!strcmp(argv[1],"stale"))stale_test();else if(!strcmp(argv[1],"health"))health_test();else if(!strcmp(argv[1],"errors"))failures_test();else if(!strcmp(argv[1],"fault"))fault_test();else worker_test();}
+int main(int argc,char **argv){assert(argc==2);if(!strcmp(argv[1],"temperature-start"))temperature_test(false);else if(!strcmp(argv[1],"temperature-active"))temperature_test(true);else if(!strncmp(argv[1],"handoff-",8))handoff_test(argv[1]);else if(!strncmp(argv[1],"input-",6))input_revocation_test(argv[1]);else if(!strncmp(argv[1],"validator-",10))validator_epoch_test(argv[1]);else if(!strcmp(argv[1],"plans"))plans_test();else if(!strcmp(argv[1],"stale"))stale_test();else if(!strcmp(argv[1],"health"))health_test();else if(!strcmp(argv[1],"errors"))failures_test();else if(!strcmp(argv[1],"fault"))fault_test();else worker_test();}
 '''
-  cls.tmp=tempfile.TemporaryDirectory();p=Path(cls.tmp.name);(p/'test.c').write_text(c);cls.bin=p/'test';cls.old=p/'historical-test';cls.epoch_old=p/'historical-epoch-test';cls.input_old=p/'historical-input-test';cls.handoff_old=p/'historical-handoff-test'
+  cls.tmp=tempfile.TemporaryDirectory();p=Path(cls.tmp.name);(p/'test.c').write_text(c);cls.bin=p/'test';cls.old=p/'historical-test';cls.epoch_old=p/'historical-epoch-test';cls.input_old=p/'historical-input-test';cls.handoff_old=p/'historical-handoff-test';cls.temperature_old=p/'historical-temperature-test'
   old=(ROOT/'historical-d-fault.c').read_text()
   worker_old=(ROOT/'historical-d-worker-prelatched.c').read_text()
   assert hashlib.sha256(worker_old.encode()).hexdigest()=='1d8984f18bd60e886353a3daa78a5e9360cbb395d0ad40dd994011478ffb853a'
@@ -336,19 +364,32 @@ int main(int argc,char **argv){assert(argc==2);if(!strncmp(argv[1],"handoff-",8)
   input_old=(ROOT/'historical-d-worker-input-revocation.c').read_text()
   assert hashlib.sha256(input_old.encode()).hexdigest()=='3e5aa9e3f06d16f592de9b2de01f0656c566d33157834ffa4ac6ce3acd48c65d'
   (p/'historical-input.c').write_text(c.replace(function(src,'d_worker'),function(input_old,'d_worker')))
-  # Remove only this WIP's added handoff block; the recovered body must equal
-  # the pinned actual pre-handoff worker, rather than a guessed substitute.
+  # Restore the exact pre-temperature-fix worker for both new negative
+  # controls and reconstruction of the older pre-handoff worker.
   current_worker=function(src,'d_worker')
-  start=current_worker.index('\n\t/* A checked ISET readback')
-  end=current_worker.index('\n\t/* A validator',start)
-  previous_worker=current_worker[:start]+current_worker[end:]
+  temperature_old=current_worker.replace('snapshot.temp_decic <= 400','snapshot.temp_decic <= 450')
+  assert hashlib.sha256(temperature_old.encode()).hexdigest()=='248fd7fcb9d8b481b9beafeab7bfe3b265a9d91e406ba01b4edd26c57bf122e6'
+  (p/'historical-temperature.c').write_text(c.replace(current_worker,temperature_old))
+  start=temperature_old.index('\n\t/* A checked ISET readback')
+  end=temperature_old.index('\n\t/* A validator',start)
+  previous_worker=temperature_old[:start]+temperature_old[end:]
   assert hashlib.sha256(previous_worker.encode()).hexdigest()=='f2906777f27eb168265852f662463552269212c73c9226f0fb6db2f9cfb12033'
   (p/'historical-handoff.c').write_text(c.replace(current_worker,previous_worker))
-  for source,target in [('historical-handoff.c',cls.handoff_old),('test.c',cls.bin),('historical.c',cls.old),('historical-epoch.c',cls.epoch_old),('historical-input.c',cls.input_old)]:
+  for source,target in [('historical-temperature.c',cls.temperature_old),('historical-handoff.c',cls.handoff_old),('test.c',cls.bin),('historical.c',cls.old),('historical-epoch.c',cls.epoch_old),('historical-input.c',cls.input_old)]:
    subprocess.run(['gcc',*(['-DCASCADIA_HISTORICAL_EPOCH_WORKER'] if source=='historical-epoch.c' else []),'-DCASCADIA_OFFLINE','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-function','-fsanitize=address,undefined','-fno-sanitize-recover=all','-I',str(ROOT),str(p/source),str(ROOT/'d1946-current-core.c'),'-o',str(target)],check=True)
  @classmethod
  def tearDownClass(cls):cls.tmp.cleanup()
  def run_case(self,name):self.assertIn('fixtures PASS',subprocess.check_output([str(self.bin),name],text=True,timeout=10))
+ def test_actual_temperature_start(self):self.run_case('temperature-start')
+ def test_actual_temperature_active(self):self.run_case('temperature-active')
+ def historical_temperature_case(self,phase):
+  def no_core():resource.setrlimit(resource.RLIMIT_CORE,(0,0))
+  result=subprocess.run([str(self.temperature_old),phase],text=True,capture_output=True,preexec_fn=no_core,timeout=10)
+  self.assertNotEqual(result.returncode,0)
+  self.assertIn('temperature_limit_not_enforced',result.stderr)
+  self.assertIn('temp_decic=401 input=500 charge=480',result.stderr)
+ def test_historical_temperature_start(self):self.historical_temperature_case('temperature-start')
+ def test_historical_temperature_active(self):self.historical_temperature_case('temperature-active')
  def test_actual_handoff_modes_denied_before_fastpath(self):self.run_case('handoff-modes')
  def test_actual_handoff_good_mode_preserves_fastpath(self):self.run_case('handoff-fast')
  def test_actual_handoff_zero_does_not_require_mode(self):self.run_case('handoff-zero')

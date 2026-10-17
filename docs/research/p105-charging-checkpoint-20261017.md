@@ -4,7 +4,24 @@ Linux charging remains unqualified. The completed USB500 observation showed
 net battery discharge, and the additional firmware analysis has not established
 the missing analog protection or a physical charge-cutoff contract. This update
 records the completed observation, improved analysis coverage and one newly
-tested measurement interface. It changes no runtime charging code or opt-in.
+tested measurement interface. A later correction below narrows the experimental
+worker's temperature window; charging opt-ins remain disabled by default.
+
+## Experimental temperature-window correction
+
+The worker previously accepted temperatures through 45°C, exceeding the agreed
+40°C experimental maximum. It now permits 10..40°C. A fresh out-of-range sample
+selects zero input/current and requests charge inhibition even when a positive
+plan was already applied. This is an experimental software bound, distinct from
+the original P105 thermal table and from hardware thermal protection.
+
+The actual-C small-current suite passes 30 tests under ASan/UBSan and Werror.
+New tests cover initial admission and withdrawal of an active plan, including
+the 10/40°C endpoints and rejection at 9.9,40.1, 45 and 45.1°C. Both old-worker
+controls reproduce the 40.1°C defect. A scoped ARM frontend object build with
+W=1 passes without warnings against the existing read-only prepared kernel.
+No full kernel rebuild or device deployment was performed. This fix neither
+explains the inactive USB500 observation nor establishes physical cutoff.
 
 ## Completed Linux observation
 

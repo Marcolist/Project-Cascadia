@@ -349,7 +349,7 @@ static void d_worker(struct work_struct *work)
 	usable = snapshot.online == 1 && snapshot.budget_ua > 0 &&
 		 snapshot.present == 1 && snapshot.voltage_uv >= 2800000 &&
 		 snapshot.voltage_uv <= 4100000 && snapshot.temp_decic >= 100 &&
-		 snapshot.temp_decic <= 450 && (d->status[0] & 8);
+		 snapshot.temp_decic <= 400 && (d->status[0] & 8);
 	if (usable) {
 		unsigned int maximum = min_t(unsigned int,
 					     snapshot.budget_ua / 1000,
