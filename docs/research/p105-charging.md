@@ -135,6 +135,11 @@ VBUS regulator or permit blindly driving the Lightning port as a power source.
 
 ## Concrete D1946 firmware functions
 
+The [17 October checkpoint](p105-charging-checkpoint-20261017.md) records the
+completed USB500 discharge observation, improved REA function discovery and
+the source VBUS getter's tested error contract. It supplies no new physical
+charging or analog-retention qualification.
+
 The D1946 kext is loaded at `0x80ecb000`. The power-source constructor at
 `0x80ed0500` stores vptr **0x80ed3c68**, including the C++ vtable's 8-byte header
 adjustment. Specifically, literal `0x374a` at `0x80ed0528` plus the add-PC

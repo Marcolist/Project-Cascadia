@@ -45,6 +45,12 @@ normal-image publication action. It is built-in-only and enables no flash writes
 
 ## Source evidence and remaining integration
 
+The [17 October charging checkpoint](p105-charging-checkpoint-20261017.md)
+separates the completed Linux USB500 observation from offline REA coverage.
+The [source VBUS getter tests](../../tests/test-source-vbus-getter.py) execute
+the original measurement wrapper with mocked gate/raw ADC and refused PMU I/O;
+they establish error propagation, not caller policy or physical cutoff.
+
 [Native RSA evidence](../../experiments/p105-iap-native-policy/rsa-closure/REAL_RSA_PROFILE.md)
 replaces synthetic public-key getters with actual native DER import and key-size
 checks. [Signature-link cases](../../experiments/p105-iap-native-policy/rsa-closure/NATIVE_LINK.md)
